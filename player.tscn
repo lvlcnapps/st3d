@@ -1,0 +1,91 @@
+[gd_scene format=3 uid="uid://ycxg2xajac1o"]
+
+[ext_resource type="Script" uid="uid://burv50ciftnu2" path="res://player.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://d0f0svqt0iabh" path="res://objects/ship.glb" id="2"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_1"]
+height = 1.0
+radius = 0.5
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_player"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:rotation")
+properties/1/spawn = true
+properties/1/replication_mode = 1
+properties/2/path = NodePath(".:sync_velocity")
+properties/2/spawn = true
+properties/2/replication_mode = 1
+properties/3/path = NodePath(".:sync_hp")
+properties/3/spawn = true
+properties/3/replication_mode = 1
+properties/4/path = NodePath(".:sync_energy")
+properties/4/spawn = true
+properties/4/replication_mode = 1
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_laser"]
+transparency = 1
+albedo_color = Color(1, 0.2, 0.2, 0.5)
+emission_enabled = true
+emission = Color(1, 0.2, 0.2, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_laser"]
+material = SubResource("StandardMaterial3D_laser")
+top_radius = 0.02
+bottom_radius = 0.02
+height = 1.0
+
+[node name="Player" type="CharacterBody3D" unique_id=1010021696]
+script = ExtResource("1")
+recoil_force = 5.0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=111414587]
+shape = SubResource("CylinderShape3D_1")
+
+[node name="ShipModel" parent="." unique_id=65351180 instance=ExtResource("2")]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
+
+[node name="LaserPivot" type="Node3D" parent="."]
+
+[node name="LaserMesh" type="MeshInstance3D" parent="LaserPivot"]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0, -0.5)
+mesh = SubResource("CylinderMesh_laser")
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1391586196]
+
+[node name="MarginContainer" type="MarginContainer" parent="HUD" unique_id=66168236]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="SpeedLabel" type="Label" parent="HUD/MarginContainer" unique_id=1226221204]
+layout_mode = 2
+size_flags_horizontal = 0
+size_flags_vertical = 0
+theme_override_font_sizes/font_size = 24
+text = "Speed: 0.0 units/s"
+
+[node name="CenterContainer" type="CenterContainer" parent="HUD"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="DeadLabel" type="Label" parent="HUD/CenterContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.2, 0.2, 1)
+theme_override_font_sizes/font_size = 48
+text = ""
+horizontal_alignment = 1
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="." unique_id=837911470]
+replication_config = SubResource("SceneReplicationConfig_player")

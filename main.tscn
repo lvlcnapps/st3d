@@ -1,0 +1,3761 @@
+[gd_scene load_steps=8 format=3 uid="uid://2bfjphrljnck"]
+
+[ext_resource type="PackedScene" path="res://player.tscn" id="1"]
+[ext_resource type="Script" uid="uid://yhjd7663f2t2" path="res://camera_follow.gd" id="2"]
+
+[sub_resource type="Environment" id="Environment_1"]
+background_mode = 1
+background_color = Color(0.65, 0.25, 0.1, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.6, 0.4, 0.3, 1)
+
+[sub_resource type="Shader" id="Shader_barrier"]
+code = "shader_type spatial;
+render_mode blend_add, depth_draw_never, cull_disabled, unshaded;
+
+uniform vec4 shield_color : source_color = vec4(0.0, 0.8, 1.0, 1.0);
+uniform float line_thickness = 0.05;
+uniform float speed = 1.0;
+uniform float hexes_around = 60.0; // Должно быть четным!
+
+varying vec3 local_pos;
+
+void vertex() {
+    local_pos = VERTEX;
+}
+
+// Абсолютно надежный алгоритм гексагональной сетки
+float hexGrid(vec2 uv) {
+    vec2 p = uv;
+    p.x *= 1.1547005; // 2.0 / sqrt(3.0)
+    p.y += mod(floor(p.x), 2.0) * 0.5; // Смещение каждого второго столбца
+    p = abs(mod(p, 1.0) - 0.5); // Локальные координаты
+    // Дистанция до ребра шестиугольника
+    return abs(max(p.x * 1.5 + p.y, p.y * 2.0) - 1.0);
+}
+
+void fragment() {
+    // ЗАБУДЕМ ПРО UV! CSGCylinder3D сжимает весь паттерн на стыковочном полигоне.
+    // Считаем цилиндрические координаты прямо из 3D позиции вершины:
+    float angle = atan(local_pos.x, local_pos.z); // От -PI до PI
+    float u = (angle + 3.14159265) / (2.0 * 3.14159265); // От 0 до 1
+    
+    // Масштабируем так, чтобы по кругу было ровно hexes_around хексов
+    // Делим на 1.1547005, чтобы компенсировать масштабирование внутри hexGrid
+    float x_coord = u * hexes_around / 1.1547005;
+    
+    // Радиус 200 -> Периметр 1256.637. Высота хекса = Периметр / hexes_around
+    float y_coord = local_pos.y / (1256.637 / hexes_around);
+    
+    float dist = hexGrid(vec2(x_coord, y_coord));
+    
+    // Фиксированное сглаживание вместо fwidth, чтобы избежать артефакта на шве atan
+    float fw = 0.03;
+    float line = 1.0 - smoothstep(line_thickness - fw, line_thickness + fw, dist);
+    
+    float wave = (sin(local_pos.y * 0.1 - TIME * speed) + 1.0) * 0.5;
+    float brightness = mix(0.5, 1.0, wave);
+    
+    // Затухание сверху и снизу (высота барьера от -500 до +500)
+    float fade_top = smoothstep(500.0, 450.0, local_pos.y);
+    float fade_bot = smoothstep(-500.0, -450.0, local_pos.y);
+    float edge_fade = fade_top * fade_bot;
+    
+    float alpha = max(line, 0.05) * brightness * shield_color.a * edge_fade;
+    
+    ALBEDO = shield_color.rgb * (1.0 + line * 2.0); // Линии светятся ярче
+    ALPHA = clamp(alpha, 0.0, 1.0);
+}
+"
+
+[sub_resource type="ShaderMaterial" id="StandardMaterial3D_barrier"]
+render_priority = 0
+shader = SubResource("Shader_barrier")
+shader_parameter/shield_color = Color(0.0, 0.8, 1, 0.8)
+shader_parameter/line_thickness = 0.03
+shader_parameter/speed = 1.0
+shader_parameter/hexes_around = 60.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rock"]
+albedo_color = Color(0.5, 0.2, 0.1, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_planet"]
+albedo_color = Color(0.4, 0.15, 0.05, 1)
+
+[node name="Main" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_1")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, -0.75, 0.433013, 0, 10, 0)
+shadow_enabled = true
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://player.tscn")
+spawn_path = NodePath("../Players")
+
+[node name="Bullets" type="Node3D" parent="."]
+
+[node name="BulletSpawner" type="MultiplayerSpawner" parent="."]
+_spawnable_scenes = PackedStringArray("res://bullet.tscn")
+spawn_path = NodePath("../Bullets")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 35, 0)
+script = ExtResource("2")
+
+[node name="Barrier" type="CSGCylinder3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+flip_faces = true
+radius = 200.0
+height = 1000.0
+sides = 64
+use_collision = true
+material = SubResource("StandardMaterial3D_barrier")
+
+[node name="PlanetSurface" type="CSGSphere3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1400, 0)
+radius = 1200.0
+radial_segments = 256
+rings = 128
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_1" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -48.435, 1192.144, -28.220)
+radius = 32.727
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_2" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -135.187, 1180.760, 135.657)
+radius = 19.294
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_3" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 404.412, 1077.504, -328.001)
+radius = 18.188
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_4" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 426.727, 1110.987, -95.394)
+radius = 32.560
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_5" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 184.134, 1180.989, 12.441)
+radius = 23.670
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_6" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -302.989, 1114.966, 313.946)
+radius = 14.524
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_7" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21.276, 1186.520, 141.772)
+radius = 24.429
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_8" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 742.258, 915.592, -212.098)
+radius = 15.698
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_9" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 104.807, 1005.987, -637.281)
+radius = 26.961
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_10" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 592.730, 1038.801, -20.285)
+radius = 21.979
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_11" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.277, 1183.992, -149.071)
+radius = 33.508
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_12" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -89.379, 785.468, -897.894)
+radius = 28.029
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_13" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 68.137, 1196.066, -21.678)
+radius = 9.010
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_14" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -916.636, 746.949, -181.784)
+radius = 29.340
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_15" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 529.905, 1049.628, -208.603)
+radius = 33.162
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_16" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 735.106, 716.294, 614.988)
+radius = 28.963
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_17" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 309.498, 1148.755, -93.330)
+radius = 34.416
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_18" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 69.265, 1193.883, -76.476)
+radius = 8.363
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_19" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 35.390, 836.512, -855.670)
+radius = 20.345
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_20" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -81.798, 1188.161, -113.363)
+radius = 18.341
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_21" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13.825, 1195.178, 65.819)
+radius = 14.681
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_22" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -479.376, 779.351, 771.059)
+radius = 26.461
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_23" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 669.006, 942.956, 303.390)
+radius = 29.654
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_24" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 141.019, 1113.683, -418.167)
+radius = 11.124
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_25" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 26.608, 1193.813, -51.155)
+radius = 24.003
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_26" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -54.586, 1165.683, -266.551)
+radius = 15.325
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_27" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -146.770, 1185.748, -50.674)
+radius = 20.821
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_28" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 240.207, 902.978, -745.180)
+radius = 32.105
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_29" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -286.848, 1128.494, -277.201)
+radius = 16.323
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_30" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.347, 921.032, 765.425)
+radius = 15.673
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_31" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27.658, 995.863, -662.062)
+radius = 22.958
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_32" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 221.012, 1047.891, 534.392)
+radius = 17.873
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_33" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 199.395, 1160.946, -214.994)
+radius = 13.385
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_34" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 343.371, 1006.142, -551.023)
+radius = 15.253
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_35" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 310.841, 1130.413, 236.966)
+radius = 20.733
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_36" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -467.258, 1078.309, -231.484)
+radius = 12.354
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_37" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 444.859, 1089.346, -218.340)
+radius = 17.764
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_38" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 430.951, 1115.782, 66.399)
+radius = 10.977
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_39" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 800.465, 882.614, 123.829)
+radius = 13.900
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_40" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 362.637, 1136.394, 51.313)
+radius = 31.742
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_41" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 58.335, 1193.006, 49.246)
+radius = 22.814
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_42" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -693.957, 956.734, -187.006)
+radius = 21.148
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_43" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -590.418, 1005.538, 270.140)
+radius = 18.178
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_44" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -305.746, 774.322, 862.339)
+radius = 10.692
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_45" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -236.713, 878.340, 779.569)
+radius = 13.521
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_46" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 117.228, 1191.112, 21.530)
+radius = 14.773
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_47" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.885, 1162.966, -274.907)
+radius = 25.501
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_48" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 674.167, 985.902, 11.251)
+radius = 33.788
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_49" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -391.853, 1126.953, 42.601)
+radius = 32.324
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_50" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -748.019, 780.531, 512.870)
+radius = 26.188
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_51" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -89.987, 1180.031, 176.587)
+radius = 17.446
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_52" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 135.988, 1154.528, 270.955)
+radius = 32.723
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_53" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39.047, 1120.154, -418.313)
+radius = 19.485
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_54" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 613.255, 997.299, 252.958)
+radius = 13.332
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_55" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 246.640, 757.764, -892.804)
+radius = 25.849
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_56" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -912.641, 695.213, -342.493)
+radius = 23.165
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_57" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 107.376, 1190.358, -52.522)
+radius = 18.367
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_58" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 216.566, 1111.569, 385.861)
+radius = 19.363
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_59" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -261.937, 1162.274, -128.641)
+radius = 8.511
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_60" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -55.308, 1144.265, 341.090)
+radius = 24.541
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_61" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -117.760, 1192.341, -6.303)
+radius = 9.250
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_62" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -41.151, 1196.453, 34.243)
+radius = 11.761
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_63" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -152.430, 1176.151, -158.832)
+radius = 17.416
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_64" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -110.574, 1098.680, -463.309)
+radius = 13.683
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_65" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -149.357, 1186.346, 54.387)
+radius = 15.398
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_66" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -157.255, 861.332, -814.356)
+radius = 29.512
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_67" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -242.809, 1114.151, 365.846)
+radius = 13.152
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_68" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 534.652, 940.400, -514.331)
+radius = 13.959
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_69" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 303.795, 1147.681, 142.660)
+radius = 22.144
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="CraterHole_70" type="CSGSphere3D" parent="PlanetSurface"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -497.129, 904.569, 602.071)
+radius = 33.399
+radial_segments = 32
+rings = 16
+operation = 2
+material = SubResource("StandardMaterial3D_planet")
+
+[node name="Obstacles" type="Node3D" parent="."]
+
+[node name="Rock_0" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 151.920, -140.371, 83.402)
+radius = 11.742
+height = 144.419
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_1" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 158.198, -128.988, 64.449)
+radius = 10.264
+height = 166.466
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_2" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -167.410, -90.318, -8.488)
+radius = 9.366
+height = 242.894
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_3" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -156.348, -78.130, -19.539)
+radius = 7.424
+height = 264.518
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_4" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -180.092, -98.327, -13.841)
+radius = 6.798
+height = 230.688
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_5" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -179.366, -98.856, -9.388)
+radius = 5.896
+height = 229.323
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_6" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -176.230, -112.873, 6.953)
+radius = 11.763
+height = 200.318
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_7" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -126.459, -80.151, 85.806)
+radius = 8.443
+height = 259.240
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_8" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -110.602, -70.495, 85.700)
+radius = 9.313
+height = 275.380
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_9" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 153.575, -175.371, -82.929)
+radius = 11.790
+height = 74.779
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_10" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 163.542, -172.793, -95.205)
+radius = 7.897
+height = 84.444
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_11" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 154.711, -180.716, -95.689)
+radius = 4.224
+height = 66.304
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_12" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 82.899, -85.725, 109.461)
+radius = 11.986
+height = 244.313
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_13" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 80.337, -83.991, 95.489)
+radius = 5.191
+height = 245.029
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_14" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 91.884, -109.830, 126.697)
+radius = 10.205
+height = 200.840
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_15" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 94.825, -78.369, 119.122)
+radius = 4.733
+height = 262.659
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_16" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 102.222, -104.677, 99.667)
+radius = 11.462
+height = 207.692
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_17" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36.679, -82.922, 1.184)
+radius = 10.246
+height = 235.279
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_18" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 22.458, -79.466, -7.908)
+radius = 8.647
+height = 241.540
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_19" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 46.904, -98.662, 15.186)
+radius = 10.389
+height = 204.703
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_20" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 29.132, -59.307, -9.013)
+radius = 4.524
+height = 282.160
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_21" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 80.622, -142.035, 132.116)
+radius = 14.949
+height = 135.976
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_22" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 81.926, -145.657, 149.664)
+radius = 5.087
+height = 133.070
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_23" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 75.188, -139.293, 149.427)
+radius = 6.253
+height = 144.847
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_24" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 77.819, -141.153, 154.197)
+radius = 11.220
+height = 142.685
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_25" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 78.700, -150.898, 149.149)
+radius = 4.015
+height = 122.021
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_26" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 124.797, -76.075, -133.550)
+radius = 6.706
+height = 275.856
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_27" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 124.272, -48.901, -125.424)
+radius = 4.476
+height = 328.319
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_28" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 136.609, -55.776, -133.282)
+radius = 7.899
+height = 318.998
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_29" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 69.454, -183.776, 103.757)
+radius = 6.544
+height = 45.474
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_30" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 63.806, -183.153, 99.882)
+radius = 4.178
+height = 45.429
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_31" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 70.570, -182.934, 91.763)
+radius = 8.201
+height = 45.325
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_32" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 71.498, -187.602, 116.288)
+radius = 7.474
+height = 40.376
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_33" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 83.105, -185.125, 103.652)
+radius = 8.262
+height = 44.503
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_34" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -117.965, -64.079, 37.213)
+radius = 10.309
+height = 284.627
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_35" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -127.080, -56.405, 46.194)
+radius = 5.880
+height = 302.474
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_36" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -120.358, -80.957, 26.167)
+radius = 4.009
+height = 250.762
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_37" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -105.516, -37.604, 32.016)
+radius = 5.185
+height = 334.947
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_38" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -109.559, -72.565, 27.899)
+radius = 5.359
+height = 265.546
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_39" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.350, -139.201, 39.353)
+radius = 10.020
+height = 123.060
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_40" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 23.749, -130.141, 31.006)
+radius = 4.860
+height = 140.990
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_41" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.797, -131.650, 49.187)
+radius = 4.412
+height = 138.744
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_42" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25.103, -142.015, 55.385)
+radius = 11.433
+height = 119.053
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_43" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.564, -133.796, 30.891)
+radius = 7.399
+height = 133.205
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_44" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -49.583, -134.755, 127.056)
+radius = 8.859
+height = 146.041
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_45" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -58.245, -137.141, 131.563)
+radius = 4.497
+height = 143.032
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_46" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39.658, -141.004, 131.784)
+radius = 4.388
+height = 133.828
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_47" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -62.833, -126.402, 126.208)
+radius = 6.902
+height = 163.818
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_48" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39.562, -140.801, 139.661)
+radius = 8.938
+height = 136.022
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_49" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38.145, -138.179, -89.832)
+radius = 13.039
+height = 131.592
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_50" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -53.893, -150.690, -87.361)
+radius = 5.081
+height = 107.417
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_51" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26.301, -141.048, -103.585)
+radius = 6.517
+height = 127.441
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_52" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -46.674, -134.708, -109.640)
+radius = 10.076
+height = 142.446
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_53" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44.776, -159.936, -108.596)
+radius = 13.093
+height = 91.653
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_54" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30.821, -153.797, -120.052)
+radius = 8.039
+height = 105.243
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_55" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 119.593, -178.651, -134.996)
+radius = 8.058
+height = 69.958
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_56" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 128.834, -193.085, -119.192)
+radius = 14.053
+height = 39.640
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_57" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 112.325, -192.982, -118.254)
+radius = 4.964
+height = 36.307
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_58" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 118.279, -191.538, -98.727)
+radius = 11.621
+height = 36.786
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_59" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 144.613, -193.805, -103.753)
+radius = 9.682
+height = 38.935
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_60" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 136.861, -198.133, -131.341)
+radius = 4.016
+height = 33.908
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_61" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -138.710, -170.480, -107.444)
+radius = 7.402
+height = 84.832
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_62" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -147.426, -175.010, -96.038)
+radius = 10.220
+height = 75.918
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_63" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -140.052, -167.405, -121.149)
+radius = 7.958
+height = 93.938
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_64" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -129.635, -169.837, -103.321)
+radius = 6.556
+height = 83.338
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_65" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -134.010, -163.854, -93.624)
+radius = 10.092
+height = 94.666
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_66" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 167.961, -89.256, -76.294)
+radius = 12.331
+height = 250.016
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_67" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 176.358, -113.109, -91.457)
+radius = 6.894
+height = 206.900
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_68" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 106.912, -83.810, 58.696)
+radius = 8.225
+height = 244.808
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_69" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 110.220, -94.760, 42.310)
+radius = 9.571
+height = 222.124
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_70" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 117.833, -106.643, 51.079)
+radius = 7.519
+height = 200.499
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_71" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 114.613, -85.643, 51.390)
+radius = 4.202
+height = 241.897
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_72" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39.270, -93.507, 161.682)
+radius = 13.079
+height = 236.167
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_73" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 106.868, -91.778, 93.606)
+radius = 14.006
+height = 233.322
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_74" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 123.634, -88.908, 105.022)
+radius = 9.079
+height = 244.215
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_75" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38.365, -137.949, -4.158)
+radius = 6.195
+height = 125.344
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_76" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -27.674, -77.788, 152.083)
+radius = 8.544
+height = 264.420
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_77" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -38.877, -96.956, 148.949)
+radius = 5.990
+height = 225.918
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_78" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 74.123, -158.097, 162.928)
+radius = 10.031
+height = 110.656
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_79" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 62.708, -154.561, 153.639)
+radius = 8.420
+height = 113.937
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_80" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 85.613, -157.167, 158.235)
+radius = 4.840
+height = 112.793
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_81" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 72.914, -161.882, 178.232)
+radius = 7.161
+height = 107.339
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_82" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18.269, -172.959, -1.788)
+radius = 6.273
+height = 54.363
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_83" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42.287, -149.517, 104.599)
+radius = 13.929
+height = 111.598
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_84" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -29.132, -96.587, 183.166)
+radius = 13.491
+height = 235.665
+use_collision = true
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_85" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -600.001, -300.100, -79.695)
+rotation = Vector3(-0.056, -0.030, 0.500)
+radius = 14.983
+height = 110.883
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_86" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -580.645, -289.545, -101.605)
+rotation = Vector3(-0.072, -0.038, 0.483)
+radius = 16.693
+height = 114.424
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_87" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -618.211, -305.247, -68.372)
+rotation = Vector3(-0.047, -0.027, 0.515)
+radius = 6.623
+height = 118.209
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_88" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -580.348, -292.188, -99.602)
+rotation = Vector3(-0.070, -0.037, 0.484)
+radius = 14.860
+height = 109.160
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_89" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -611.935, -301.619, -58.240)
+rotation = Vector3(-0.040, -0.023, 0.509)
+radius = 12.770
+height = 117.378
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_90" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -237.205, -226.390, 330.946)
+rotation = Vector3(0.264, 0.055, 0.207)
+radius = 10.733
+height = 84.473
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_91" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -226.984, -237.583, 316.315)
+rotation = Vector3(0.256, 0.051, 0.199)
+radius = 5.742
+height = 51.767
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_92" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -232.582, -234.008, 306.557)
+rotation = Vector3(0.247, 0.050, 0.203)
+radius = 13.228
+height = 55.694
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_93" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -242.860, -237.468, 313.768)
+rotation = Vector3(0.253, 0.054, 0.213)
+radius = 7.030
+height = 56.755
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_94" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -248.245, -230.425, 352.446)
+rotation = Vector3(0.280, 0.061, 0.218)
+radius = 16.270
+height = 92.990
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_95" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -789.048, -442.213, 6.753)
+rotation = Vector3(0.004, 0.003, 0.689)
+radius = 17.759
+height = 81.932
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_96" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -774.913, -439.678, 28.514)
+rotation = Vector3(0.018, 0.015, 0.679)
+radius = 8.223
+height = 68.620
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_97" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -788.901, -456.625, -21.697)
+rotation = Vector3(-0.014, -0.011, 0.697)
+radius = 16.714
+height = 59.912
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_98" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -777.959, -419.607, 27.048)
+rotation = Vector3(0.017, 0.013, 0.671)
+radius = 13.528
+height = 103.695
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_99" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -801.858, -471.813, 6.169)
+rotation = Vector3(0.004, 0.003, 0.713)
+radius = 9.175
+height = 53.199
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_100" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 432.712, -227.725, -199.420)
+rotation = Vector3(-0.148, 0.055, -0.358)
+radius = 18.542
+height = 130.800
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_101" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 402.713, -229.482, -199.921)
+rotation = Vector3(-0.151, 0.052, -0.335)
+radius = 9.504
+height = 107.794
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_102" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 408.861, -240.633, -179.012)
+rotation = Vector3(-0.136, 0.048, -0.342)
+radius = 6.621
+height = 84.628
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_103" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -845.961, -441.715, -232.278)
+rotation = Vector3(-0.134, -0.120, 0.731)
+radius = 12.435
+height = 198.394
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_104" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -819.080, -445.212, -236.125)
+rotation = Vector3(-0.140, -0.122, 0.718)
+radius = 7.660
+height = 159.895
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_105" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -827.910, -474.605, -243.710)
+rotation = Vector3(-0.144, -0.130, 0.739)
+radius = 9.474
+height = 130.760
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_106" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -840.386, -423.685, -219.022)
+rotation = Vector3(-0.127, -0.110, 0.718)
+radius = 8.026
+height = 213.359
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_107" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 384.069, -548.404, -801.246)
+rotation = Vector3(-0.635, 0.339, -0.536)
+radius = 13.110
+height = 61.478
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_108" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 387.207, -567.916, -817.267)
+rotation = Vector3(-0.647, 0.359, -0.557)
+radius = 7.550
+height = 57.819
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_109" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 135.015, -496.416, -824.540)
+rotation = Vector3(-0.724, 0.133, -0.199)
+radius = 17.947
+height = 61.349
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_110" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 160.081, -513.688, -836.801)
+rotation = Vector3(-0.734, 0.164, -0.242)
+radius = 14.458
+height = 58.790
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_111" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 163.460, -502.282, -829.270)
+rotation = Vector3(-0.723, 0.161, -0.241)
+radius = 14.033
+height = 66.014
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_112" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 353.261, -162.495, -216.609)
+rotation = Vector3(-0.160, 0.046, -0.282)
+radius = 11.144
+height = 210.082
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_113" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -278.977, -318.991, 519.552)
+rotation = Vector3(0.421, 0.116, 0.277)
+radius = 15.229
+height = 62.796
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_114" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -271.713, -321.245, 541.472)
+rotation = Vector3(0.438, 0.118, 0.273)
+radius = 8.594
+height = 74.455
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_115" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -301.287, -325.832, 514.671)
+rotation = Vector3(0.415, 0.124, 0.300)
+radius = 10.281
+height = 57.233
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_116" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -269.042, -321.356, 531.739)
+rotation = Vector3(0.432, 0.115, 0.270)
+radius = 5.048
+height = 64.633
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_117" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -542.783, -333.729, 390.086)
+rotation = Vector3(0.280, 0.147, 0.492)
+radius = 17.158
+height = 116.914
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_118" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -733.034, -584.808, -676.857)
+rotation = Vector3(-0.401, -0.392, 0.813)
+radius = 8.220
+height = 176.829
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_119" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -722.194, -553.562, -676.595)
+rotation = Vector3(-0.406, -0.376, 0.785)
+radius = 12.770
+height = 204.460
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_120" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 555.448, -272.492, 351.544)
+rotation = Vector3(0.244, -0.123, -0.473)
+radius = 14.953
+height = 210.273
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_121" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 313.962, -209.834, -214.004)
+rotation = Vector3(-0.166, 0.044, -0.262)
+radius = 19.769
+height = 98.691
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_122" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 330.925, -217.028, -193.072)
+rotation = Vector3(-0.150, 0.042, -0.276)
+radius = 10.733
+height = 86.934
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_123" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 290.434, -203.617, -232.017)
+rotation = Vector3(-0.181, 0.044, -0.242)
+radius = 11.077
+height = 105.606
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_124" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 332.214, -224.739, -227.373)
+rotation = Vector3(-0.177, 0.051, -0.280)
+radius = 9.133
+height = 84.595
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_125" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 344.184, -204.117, -220.313)
+rotation = Vector3(-0.168, 0.049, -0.284)
+radius = 11.289
+height = 127.558
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_126" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 605.878, -275.771, 173.148)
+rotation = Vector3(0.119, -0.064, -0.498)
+radius = 14.893
+height = 177.564
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_127" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 575.450, -272.295, 151.669)
+rotation = Vector3(0.106, -0.054, -0.475)
+radius = 17.137
+height = 150.188
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_128" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 615.323, -283.763, 151.679)
+rotation = Vector3(0.104, -0.057, -0.507)
+radius = 12.401
+height = 167.188
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_129" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -374.782, -502.400, 784.301)
+rotation = Vector3(0.618, 0.301, 0.492)
+radius = 19.821
+height = 99.020
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_130" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -400.271, -518.262, 786.758)
+rotation = Vector3(0.612, 0.324, 0.529)
+radius = 9.986
+height = 95.329
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_131" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -373.395, -474.919, 755.247)
+rotation = Vector3(0.594, 0.276, 0.469)
+radius = 11.652
+height = 102.477
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_132" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -350.761, -471.053, 775.728)
+rotation = Vector3(0.614, 0.269, 0.447)
+radius = 14.147
+height = 120.103
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_133" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -356.805, -523.806, 814.645)
+rotation = Vector3(0.649, 0.314, 0.493)
+radius = 16.764
+height = 96.936
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_134" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21.018, -205.133, 341.181)
+rotation = Vector3(0.278, -0.005, -0.018)
+radius = 14.806
+height = 85.602
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_135" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -488.479, -337.967, -496.741)
+rotation = Vector3(-0.363, -0.176, 0.463)
+radius = 8.741
+height = 140.298
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_136" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -478.864, -347.365, -503.239)
+rotation = Vector3(-0.372, -0.178, 0.461)
+radius = 7.208
+height = 122.381
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_137" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -498.362, -322.434, -490.367)
+rotation = Vector3(-0.354, -0.172, 0.464)
+radius = 5.834
+height = 169.024
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_138" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 264.819, -232.964, 371.095)
+rotation = Vector3(0.293, -0.069, -0.233)
+radius = 19.779
+height = 105.844
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_139" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 66.866, -381.807, -798.186)
+rotation = Vector3(-0.662, 0.051, -0.083)
+radius = 14.254
+height = 190.976
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_140" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -351.616, -540.525, -849.013)
+rotation = Vector3(-0.675, -0.333, 0.506)
+radius = 14.964
+height = 116.468
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_141" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -325.419, -543.874, -857.951)
+rotation = Vector3(-0.693, -0.321, 0.480)
+radius = 16.187
+height = 109.923
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_142" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -352.784, -530.535, -805.476)
+rotation = Vector3(-0.648, -0.312, 0.491)
+radius = 16.865
+height = 73.231
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_143" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -118.042, -307.310, 598.281)
+rotation = Vector3(0.495, 0.058, 0.122)
+radius = 19.634
+height = 102.676
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_144" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -125.712, -325.747, 616.372)
+rotation = Vector3(0.514, 0.066, 0.134)
+radius = 5.214
+height = 89.769
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_145" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -115.505, -293.022, 573.126)
+rotation = Vector3(0.473, 0.053, 0.117)
+radius = 7.895
+height = 103.770
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_146" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -111.418, -305.822, 569.519)
+rotation = Vector3(0.475, 0.052, 0.114)
+radius = 8.789
+height = 77.088
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_147" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 639.127, -281.350, 103.870)
+rotation = Vector3(0.070, -0.040, -0.520)
+radius = 11.270
+height = 185.073
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_148" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 649.083, -285.325, 126.659)
+rotation = Vector3(0.085, -0.049, -0.529)
+radius = 14.614
+height = 192.182
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_149" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 644.617, -326.908, 96.432)
+rotation = Vector3(0.066, -0.040, -0.542)
+radius = 16.756
+height = 111.062
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_150" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 670.049, -271.293, 98.851)
+rotation = Vector3(0.065, -0.038, -0.537)
+radius = 9.841
+height = 232.654
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_151" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 713.336, -400.205, 254.773)
+rotation = Vector3(0.166, -0.120, -0.630)
+radius = 9.432
+height = 108.664
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_152" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 716.756, -381.314, 235.765)
+rotation = Vector3(0.153, -0.108, -0.621)
+radius = 14.772
+height = 135.386
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_153" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 710.490, -377.913, 250.718)
+rotation = Vector3(0.163, -0.114, -0.617)
+radius = 9.463
+height = 139.542
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_154" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 692.688, -402.820, 246.278)
+rotation = Vector3(0.164, -0.115, -0.617)
+radius = 9.087
+height = 77.771
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_155" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 718.459, -408.493, 245.078)
+rotation = Vector3(0.160, -0.117, -0.636)
+radius = 5.669
+height = 97.465
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_156" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -256.146, -397.650, -765.932)
+rotation = Vector3(-0.614, -0.181, 0.308)
+radius = 9.697
+height = 174.466
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_157" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 675.190, -365.399, -167.444)
+rotation = Vector3(-0.113, 0.074, -0.582)
+radius = 14.367
+height = 93.447
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_158" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 685.506, -365.221, -149.852)
+rotation = Vector3(-0.100, 0.067, -0.588)
+radius = 7.864
+height = 100.513
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_159" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 685.552, -389.558, -145.971)
+rotation = Vector3(-0.098, 0.067, -0.599)
+radius = 15.807
+height = 59.497
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_160" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -294.196, -307.100, -654.100)
+rotation = Vector3(-0.504, -0.149, 0.301)
+radius = 16.726
+height = 214.443
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_161" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -284.705, -361.186, -665.538)
+rotation = Vector3(-0.532, -0.162, 0.312)
+radius = 16.703
+height = 132.297
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_162" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -314.803, -299.671, -633.441)
+rotation = Vector3(-0.484, -0.151, 0.316)
+radius = 13.148
+height = 216.159
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_163" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -285.422, -287.118, -631.252)
+rotation = Vector3(-0.485, -0.136, 0.285)
+radius = 11.035
+height = 221.794
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_164" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 602.203, -466.573, -630.350)
+rotation = Vector3(-0.428, 0.298, -0.638)
+radius = 14.390
+height = 154.429
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_165" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 583.785, -465.511, -651.561)
+rotation = Vector3(-0.446, 0.304, -0.628)
+radius = 15.387
+height = 160.160
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_166" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 583.500, -459.099, -599.828)
+rotation = Vector3(-0.417, 0.278, -0.614)
+radius = 13.157
+height = 118.380
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_167" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 594.709, -510.023, -642.284)
+rotation = Vector3(-0.442, 0.322, -0.662)
+radius = 13.951
+height = 96.611
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_168" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 831.706, -462.500, -121.269)
+rotation = Vector3(-0.072, 0.064, -0.728)
+radius = 15.063
+height = 118.212
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_169" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 836.433, -481.380, -147.145)
+rotation = Vector3(-0.087, 0.080, -0.742)
+radius = 14.346
+height = 102.106
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_170" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 855.665, -483.363, -115.416)
+rotation = Vector3(-0.067, 0.063, -0.753)
+radius = 11.301
+height = 118.498
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_171" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -242.770, -609.026, -904.493)
+rotation = Vector3(-0.783, -0.310, 0.427)
+radius = 8.681
+height = 51.681
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_172" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -240.583, -578.292, -887.587)
+rotation = Vector3(-0.762, -0.283, 0.399)
+radius = 17.494
+height = 66.490
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_173" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -229.601, -609.720, -900.086)
+rotation = Vector3(-0.788, -0.296, 0.407)
+radius = 5.583
+height = 39.192
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_174" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -224.981, -604.523, -904.750)
+rotation = Vector3(-0.790, -0.289, 0.397)
+radius = 12.031
+height = 51.099
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_175" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -255.764, -601.102, -902.370)
+rotation = Vector3(-0.772, -0.317, 0.440)
+radius = 9.926
+height = 64.081
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_176" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 606.491, -448.158, -642.092)
+rotation = Vector3(-0.430, 0.297, -0.633)
+radius = 19.506
+height = 197.012
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_177" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -73.376, -328.763, -583.282)
+rotation = Vector3(-0.496, -0.037, 0.078)
+radius = 14.841
+height = 43.890
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_178" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -67.683, -335.769, -601.812)
+rotation = Vector3(-0.513, -0.036, 0.073)
+radius = 6.246
+height = 48.956
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_179" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -51.808, -323.818, -570.358)
+rotation = Vector3(-0.486, -0.025, 0.054)
+radius = 13.125
+height = 38.162
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_180" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -71.140, -347.388, -609.858)
+rotation = Vector3(-0.523, -0.039, 0.078)
+radius = 15.319
+height = 37.196
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_181" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -95.339, -323.141, -582.307)
+rotation = Vector3(-0.492, -0.047, 0.100)
+radius = 8.657
+height = 55.848
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_182" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 452.054, -662.299, 971.534)
+rotation = Vector3(0.690, -0.531, -0.745)
+radius = 19.060
+height = 201.873
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_183" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 429.062, -658.975, 969.716)
+rotation = Vector3(0.706, -0.516, -0.719)
+radius = 5.498
+height = 187.324
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_184" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 470.290, -707.224, 970.750)
+rotation = Vector3(0.677, -0.577, -0.805)
+radius = 11.541
+height = 163.955
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_185" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 448.229, -634.631, 930.092)
+rotation = Vector3(0.674, -0.487, -0.704)
+radius = 13.188
+height = 170.423
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_186" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -334.470, -506.126, -828.905)
+rotation = Vector3(-0.661, -0.295, 0.460)
+radius = 16.324
+height = 128.213
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_187" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -361.188, -518.644, -856.407)
+rotation = Vector3(-0.667, -0.329, 0.504)
+radius = 12.696
+height = 161.779
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_188" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 495.393, -323.434, 515.765)
+rotation = Vector3(0.371, -0.180, -0.465)
+radius = 16.647
+height = 184.897
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_189" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 514.848, -318.431, 548.332)
+rotation = Vector3(0.385, -0.194, -0.482)
+radius = 10.932
+height = 234.790
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_190" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 461.057, -341.834, 508.078)
+rotation = Vector3(0.378, -0.174, -0.444)
+radius = 8.063
+height = 122.247
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_191" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 492.362, -356.620, 526.449)
+rotation = Vector3(0.385, -0.192, -0.478)
+radius = 7.453
+height = 136.305
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_192" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -297.816, -291.516, -464.809)
+rotation = Vector3(-0.371, -0.105, 0.282)
+radius = 11.588
+height = 76.675
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_193" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -279.089, -284.391, -450.923)
+rotation = Vector3(-0.362, -0.095, 0.263)
+radius = 14.324
+height = 70.470
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_194" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -309.220, -302.880, -487.789)
+rotation = Vector3(-0.388, -0.116, 0.297)
+radius = 16.853
+height = 79.700
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_195" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -287.318, -499.554, -853.571)
+rotation = Vector3(-0.693, -0.268, 0.406)
+radius = 18.806
+height = 147.107
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_196" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -273.972, -502.712, -884.086)
+rotation = Vector3(-0.715, -0.269, 0.397)
+radius = 11.416
+height = 178.212
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_197" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.672, -150.285, 224.372)
+rotation = Vector3(0.178, 0.001, 0.008)
+radius = 17.029
+height = 139.468
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_198" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36.452, -172.698, 236.311)
+rotation = Vector3(0.190, 0.006, 0.030)
+radius = 17.578
+height = 100.754
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_199" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20.988, -164.607, 198.908)
+rotation = Vector3(0.160, 0.003, 0.017)
+radius = 11.725
+height = 102.958
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_200" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7.092, -148.965, 241.598)
+rotation = Vector3(0.191, -0.001, -0.006)
+radius = 7.170
+height = 148.340
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_201" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39.876, -136.561, 237.736)
+rotation = Vector3(0.186, 0.006, 0.032)
+radius = 16.119
+height = 172.460
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_202" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 588.428, -296.928, 59.911)
+rotation = Vector3(0.042, -0.023, -0.491)
+radius = 19.339
+height = 103.281
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_203" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 572.771, -310.595, 86.338)
+rotation = Vector3(0.062, -0.033, -0.485)
+radius = 12.448
+height = 67.650
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_204" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 561.901, -290.089, 79.042)
+rotation = Vector3(0.057, -0.029, -0.469)
+radius = 15.369
+height = 93.097
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_205" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 560.984, -270.620, 60.173)
+rotation = Vector3(0.043, -0.021, -0.461)
+radius = 15.553
+height = 124.934
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_206" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -522.106, -260.968, -151.958)
+rotation = Vector3(-0.110, -0.050, 0.433)
+radius = 13.548
+height = 124.345
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_207" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -511.544, -238.292, -164.887)
+rotation = Vector3(-0.118, -0.052, 0.418)
+radius = 10.687
+height = 160.023
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_208" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 648.870, -624.252, 709.900)
+rotation = Vector3(0.456, -0.423, -0.796)
+radius = 13.825
+height = 71.256
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_209" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 376.034, -272.267, 339.237)
+rotation = Vector3(0.263, -0.090, -0.334)
+radius = 18.307
+height = 72.460
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_210" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 353.641, -264.805, 325.596)
+rotation = Vector3(0.255, -0.081, -0.312)
+radius = 10.291
+height = 65.556
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_211" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 363.628, -247.376, 210.736)
+rotation = Vector3(0.165, -0.052, -0.310)
+radius = 14.172
+height = 53.713
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_212" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 359.038, -248.624, 227.057)
+rotation = Vector3(0.178, -0.056, -0.307)
+radius = 6.659
+height = 54.489
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_213" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 373.282, -253.753, 187.011)
+rotation = Vector3(0.146, -0.048, -0.318)
+radius = 13.728
+height = 39.832
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_214" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60.626, -189.695, 399.170)
+rotation = Vector3(0.318, -0.016, -0.053)
+radius = 11.314
+height = 151.746
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_215" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 36.344, -187.928, 406.295)
+rotation = Vector3(0.323, -0.010, -0.032)
+radius = 14.776
+height = 157.745
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_216" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 499.234, -265.177, -183.123)
+rotation = Vector3(-0.134, 0.059, -0.418)
+radius = 18.784
+height = 106.465
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_217" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 472.197, -267.132, -181.181)
+rotation = Vector3(-0.135, 0.057, -0.399)
+radius = 6.102
+height = 81.279
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_218" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 494.019, -250.132, -154.719)
+rotation = Vector3(-0.113, 0.049, -0.409)
+radius = 15.378
+height = 122.054
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_219" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -544.253, -272.932, -251.645)
+rotation = Vector3(-0.178, -0.087, 0.458)
+radius = 17.273
+height = 153.287
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_220" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -518.401, -257.387, -256.704)
+rotation = Vector3(-0.184, -0.084, 0.434)
+radius = 14.495
+height = 161.406
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_221" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -525.000, -253.087, -254.590)
+rotation = Vector3(-0.181, -0.084, 0.437)
+radius = 8.626
+height = 173.597
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_222" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 358.207, -274.466, 508.104)
+rotation = Vector3(0.386, -0.130, -0.334)
+radius = 19.334
+height = 171.620
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_223" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 325.379, -295.123, 493.505)
+rotation = Vector3(0.387, -0.120, -0.310)
+radius = 5.948
+height = 106.130
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_224" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 367.261, -306.793, 536.448)
+rotation = Vector3(0.411, -0.147, -0.355)
+radius = 16.919
+height = 143.823
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_225" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 373.380, -303.515, 475.639)
+rotation = Vector3(0.368, -0.132, -0.353)
+radius = 14.412
+height = 104.335
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_226" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 340.713, -282.290, 524.831)
+rotation = Vector3(0.403, -0.130, -0.323)
+radius = 8.169
+height = 161.880
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_227" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -572.508, -382.947, -496.697)
+rotation = Vector3(-0.348, -0.206, 0.549)
+radius = 8.665
+height = 136.825
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_228" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -558.344, -379.510, -479.955)
+rotation = Vector3(-0.341, -0.196, 0.534)
+radius = 11.982
+height = 116.747
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_229" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -545.394, -388.919, -488.154)
+rotation = Vector3(-0.351, -0.199, 0.530)
+radius = 14.224
+height = 96.424
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_230" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -583.551, -369.961, -483.278)
+rotation = Vector3(-0.335, -0.199, 0.549)
+radius = 12.389
+height = 157.396
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_231" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -288.539, -391.137, -699.766)
+rotation = Vector3(-0.563, -0.181, 0.331)
+radius = 14.626
+height = 122.484
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_232" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -264.743, -377.418, -684.054)
+rotation = Vector3(-0.554, -0.161, 0.299)
+radius = 15.079
+height = 116.898
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_233" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -305.548, -419.309, -691.077)
+rotation = Vector3(-0.562, -0.198, 0.359)
+radius = 10.429
+height = 76.047
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_234" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -303.951, -402.437, -707.184)
+rotation = Vector3(-0.567, -0.195, 0.353)
+radius = 8.190
+height = 120.022
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_235" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -310.388, -407.399, -718.224)
+rotation = Vector3(-0.573, -0.203, 0.363)
+radius = 17.139
+height = 127.801
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_236" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 680.440, -311.018, 97.943)
+rotation = Vector3(0.065, -0.040, -0.560)
+radius = 14.317
+height = 175.634
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_237" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 676.506, -320.873, 111.713)
+rotation = Vector3(0.074, -0.047, -0.562)
+radius = 5.294
+height = 157.072
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_238" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 699.450, -313.449, 76.837)
+rotation = Vector3(0.050, -0.032, -0.573)
+radius = 12.747
+height = 188.998
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_239" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 665.116, -283.197, 106.929)
+rotation = Vector3(0.070, -0.042, -0.539)
+radius = 13.366
+height = 208.495
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_240" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 696.947, -297.940, 76.159)
+rotation = Vector3(0.049, -0.031, -0.565)
+radius = 12.021
+height = 212.333
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_241" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -824.835, -594.725, -425.956)
+rotation = Vector3(-0.245, -0.258, 0.829)
+radius = 16.310
+height = 57.852
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_242" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 161.682, -435.419, 796.970)
+rotation = Vector3(0.673, -0.134, -0.213)
+radius = 9.431
+height = 123.267
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_243" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 173.211, -435.683, 820.327)
+rotation = Vector3(0.684, -0.147, -0.230)
+radius = 10.340
+height = 155.657
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_244" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 159.106, -420.131, 790.685)
+rotation = Vector3(0.662, -0.127, -0.205)
+radius = 5.822
+height = 138.221
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_245" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 279.220, -153.521, 269.670)
+rotation = Vector3(0.203, -0.046, -0.225)
+radius = 17.501
+height = 211.049
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_246" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 305.955, -157.291, 262.512)
+rotation = Vector3(0.196, -0.049, -0.246)
+radius = 10.191
+height = 212.926
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_247" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 157.807, -191.597, -211.203)
+rotation = Vector3(-0.170, 0.022, -0.132)
+radius = 10.405
+height = 73.660
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_248" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 164.989, -208.449, -223.768)
+rotation = Vector3(-0.182, 0.026, -0.140)
+radius = 9.735
+height = 47.111
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_249" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 158.858, -202.221, -194.494)
+rotation = Vector3(-0.158, 0.021, -0.134)
+radius = 9.537
+height = 47.642
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_250" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -883.109, -511.287, -71.585)
+rotation = Vector3(-0.040, -0.040, 0.783)
+radius = 9.152
+height = 109.834
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_251" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -897.236, -505.117, -82.937)
+rotation = Vector3(-0.046, -0.046, 0.788)
+radius = 5.270
+height = 139.863
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_252" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -874.793, -503.958, -66.141)
+rotation = Vector3(-0.038, -0.037, 0.774)
+radius = 5.607
+height = 108.009
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_253" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -879.491, -502.930, -90.394)
+rotation = Vector3(-0.051, -0.050, 0.777)
+radius = 15.551
+height = 119.055
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_254" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -916.915, -523.936, -69.082)
+rotation = Vector3(-0.038, -0.039, 0.809)
+radius = 17.026
+height = 140.073
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_255" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 651.331, -521.137, 591.904)
+rotation = Vector3(0.392, -0.312, -0.700)
+radius = 17.437
+height = 87.554
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_256" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -328.176, -239.637, 212.399)
+rotation = Vector3(0.168, 0.048, 0.280)
+radius = 14.344
+height = 48.882
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_257" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -313.446, -238.799, 202.166)
+rotation = Vector3(0.161, 0.044, 0.267)
+radius = 6.351
+height = 39.269
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_258" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -348.998, -252.401, 210.826)
+rotation = Vector3(0.166, 0.051, 0.299)
+radius = 10.072
+height = 35.759
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_259" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -339.121, -245.838, 200.995)
+rotation = Vector3(0.159, 0.047, 0.290)
+radius = 6.364
+height = 39.255
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_260" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -105.330, -305.091, -552.453)
+rotation = Vector3(-0.463, -0.048, 0.107)
+radius = 9.562
+height = 61.808
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_261" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -99.177, -293.564, -545.049)
+rotation = Vector3(-0.454, -0.044, 0.100)
+radius = 6.843
+height = 74.764
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_262" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -99.678, -237.029, -563.819)
+rotation = Vector3(-0.448, -0.041, 0.095)
+radius = 17.465
+height = 192.549
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_263" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -89.901, -227.261, -527.148)
+rotation = Vector3(-0.420, -0.034, 0.084)
+radius = 17.022
+height = 177.816
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_264" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -121.134, -244.416, -535.988)
+rotation = Vector3(-0.430, -0.048, 0.115)
+radius = 14.368
+height = 159.165
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_265" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -75.514, -245.358, -532.762)
+rotation = Vector3(-0.431, -0.030, 0.072)
+radius = 17.146
+height = 147.734
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_266" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -240.834, -149.170, 254.885)
+rotation = Vector3(0.194, 0.038, 0.194)
+radius = 13.052
+height = 198.110
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_267" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -268.355, -131.121, 117.513)
+rotation = Vector3(0.088, 0.019, 0.209)
+radius = 15.709
+height = 204.517
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_268" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -251.869, -104.571, 129.950)
+rotation = Vector3(0.096, 0.019, 0.193)
+radius = 9.890
+height = 252.139
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_269" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -237.111, -137.878, 109.449)
+rotation = Vector3(0.084, 0.016, 0.186)
+radius = 13.772
+height = 177.714
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_270" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -294.080, -112.417, 134.676)
+rotation = Vector3(0.099, 0.023, 0.226)
+radius = 11.137
+height = 255.176
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_271" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -255.185, -109.721, 123.777)
+rotation = Vector3(0.092, 0.018, 0.196)
+radius = 5.407
+height = 242.165
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_272" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -357.636, -237.606, -369.443)
+rotation = Vector3(-0.282, -0.089, 0.311)
+radius = 15.262
+height = 142.088
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_273" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 451.317, -618.641, -938.930)
+rotation = Vector3(-0.674, 0.480, -0.695)
+radius = 16.159
+height = 204.455
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_274" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 487.871, -617.262, -955.890)
+rotation = Vector3(-0.657, 0.501, -0.732)
+radius = 12.635
+height = 256.631
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_275" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -358.923, -259.930, 329.753)
+rotation = Vector3(0.256, 0.083, 0.316)
+radius = 10.537
+height = 79.776
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_276" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -370.710, -275.051, 331.785)
+rotation = Vector3(0.259, 0.087, 0.330)
+radius = 9.542
+height = 60.096
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_277" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -371.110, -274.132, 309.838)
+rotation = Vector3(0.243, 0.082, 0.328)
+radius = 15.710
+height = 50.551
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_278" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -382.099, -264.702, 326.308)
+rotation = Vector3(0.252, 0.087, 0.336)
+radius = 14.754
+height = 83.045
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_279" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -172.380, -214.041, 242.252)
+rotation = Vector3(0.197, 0.029, 0.147)
+radius = 17.571
+height = 45.323
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_280" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -189.965, -211.562, 231.001)
+rotation = Vector3(0.187, 0.030, 0.161)
+radius = 7.899
+height = 50.985
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_281" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -606.267, -338.558, 394.179)
+rotation = Vector3(0.270, 0.159, 0.541)
+radius = 16.473
+height = 168.732
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_282" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -624.978, -335.666, 433.131)
+rotation = Vector3(0.290, 0.176, 0.557)
+radius = 15.882
+height = 216.109
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_283" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -598.324, -314.361, 375.644)
+rotation = Vector3(0.257, 0.145, 0.522)
+radius = 12.296
+height = 190.531
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_284" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -582.184, -353.180, 401.134)
+rotation = Vector3(0.281, 0.161, 0.530)
+radius = 6.227
+height = 126.404
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_285" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -631.157, -331.376, 413.514)
+rotation = Vector3(0.276, 0.168, 0.557)
+radius = 5.235
+height = 216.341
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_286" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -283.513, -206.327, 20.874)
+rotation = Vector3(0.017, 0.004, 0.233)
+radius = 9.671
+height = 54.116
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_287" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 343.547, -169.557, -168.479)
+rotation = Vector3(-0.126, 0.035, -0.275)
+radius = 9.759
+height = 177.130
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_288" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 223.261, -512.623, -880.089)
+rotation = Vector3(-0.737, 0.231, -0.336)
+radius = 14.175
+height = 139.165
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_289" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 226.595, -492.867, -853.053)
+rotation = Vector3(-0.713, 0.218, -0.326)
+radius = 14.622
+height = 131.352
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_290" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 230.602, -548.639, -895.296)
+rotation = Vector3(-0.758, 0.259, -0.368)
+radius = 14.731
+height = 113.601
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_291" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 206.178, -538.758, -890.493)
+rotation = Vector3(-0.761, 0.230, -0.327)
+radius = 14.851
+height = 111.753
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_292" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -294.737, -169.828, -91.070)
+rotation = Vector3(-0.070, -0.017, 0.236)
+radius = 17.731
+height = 136.523
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_293" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -300.223, -179.414, -114.369)
+rotation = Vector3(-0.088, -0.022, 0.242)
+radius = 10.416
+height = 124.316
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_294" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -324.857, -160.189, -99.003)
+rotation = Vector3(-0.075, -0.020, 0.257)
+radius = 13.004
+height = 170.965
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_295" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -269.538, -422.494, -779.536)
+rotation = Vector3(-0.628, -0.202, 0.335)
+radius = 16.791
+height = 158.003
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_296" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -302.770, -411.438, -789.791)
+rotation = Vector3(-0.619, -0.220, 0.368)
+radius = 13.311
+height = 202.072
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_297" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -260.800, -410.717, -751.468)
+rotation = Vector3(-0.609, -0.185, 0.316)
+radius = 10.874
+height = 138.820
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_298" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -254.044, -417.705, -756.445)
+rotation = Vector3(-0.617, -0.185, 0.312)
+radius = 7.422
+height = 131.126
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_299" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -616.156, -692.304, 849.195)
+rotation = Vector3(0.531, 0.536, 0.865)
+radius = 11.607
+height = 131.099
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_300" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -640.113, -684.691, 850.130)
+rotation = Vector3(0.517, 0.533, 0.874)
+radius = 10.598
+height = 164.474
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_301" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -604.899, -707.434, 861.534)
+rotation = Vector3(0.541, 0.552, 0.875)
+radius = 8.220
+height = 120.151
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_302" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -585.414, -688.815, 835.180)
+rotation = Vector3(0.545, 0.523, 0.838)
+radius = 10.375
+height = 86.780
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_303" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -630.832, -727.949, 875.472)
+rotation = Vector3(0.526, 0.576, 0.913)
+radius = 14.837
+height = 142.480
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_304" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -406.423, -297.368, 549.069)
+rotation = Vector3(0.408, 0.160, 0.386)
+radius = 16.415
+height = 194.189
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_305" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -375.932, -328.766, 557.680)
+rotation = Vector3(0.429, 0.161, 0.373)
+radius = 15.038
+height = 129.722
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_306" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 434.944, -485.807, 685.864)
+rotation = Vector3(0.531, -0.283, -0.522)
+radius = 11.303
+height = 45.677
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_307" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 446.631, -471.390, 669.460)
+rotation = Vector3(0.513, -0.274, -0.521)
+radius = 14.852
+height = 57.620
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_308" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 433.359, -468.334, 665.774)
+rotation = Vector3(0.516, -0.267, -0.506)
+radius = 12.370
+height = 48.720
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_309" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -575.851, -390.715, -485.271)
+rotation = Vector3(-0.341, -0.204, 0.554)
+radius = 18.806
+height = 118.530
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_310" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -595.631, -411.071, -507.715)
+rotation = Vector3(-0.352, -0.223, 0.582)
+radius = 11.168
+height = 122.324
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_311" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -595.163, -383.080, -471.231)
+rotation = Vector3(-0.326, -0.199, 0.562)
+radius = 7.836
+height = 138.034
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_312" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -546.054, -361.137, -480.183)
+rotation = Vector3(-0.342, -0.188, 0.516)
+radius = 17.959
+height = 136.129
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_313" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -575.236, -397.791, -455.886)
+rotation = Vector3(-0.324, -0.194, 0.553)
+radius = 9.678
+height = 84.472
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_314" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -388.138, -185.670, 156.005)
+rotation = Vector3(0.116, 0.037, 0.312)
+radius = 19.459
+height = 168.724
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_315" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -400.791, -204.161, 172.347)
+rotation = Vector3(0.129, 0.043, 0.326)
+radius = 6.554
+height = 145.873
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_316" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 657.018, -341.804, -126.305)
+rotation = Vector3(-0.086, 0.053, -0.558)
+radius = 8.127
+height = 103.920
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_317" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 656.593, -358.031, -106.967)
+rotation = Vector3(-0.073, 0.046, -0.564)
+radius = 15.904
+height = 72.454
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_318" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -230.593, -223.975, -395.480)
+rotation = Vector3(-0.313, -0.063, 0.204)
+radius = 16.599
+height = 123.975
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_319" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -207.161, -213.287, -393.435)
+rotation = Vector3(-0.311, -0.056, 0.182)
+radius = 9.398
+height = 134.557
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_320" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -207.903, -212.723, -396.613)
+rotation = Vector3(-0.313, -0.057, 0.182)
+radius = 8.132
+height = 137.835
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_321" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 512.862, -518.272, -718.447)
+rotation = Vector3(-0.521, 0.340, -0.618)
+radius = 9.179
+height = 95.306
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_322" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 513.905, -505.470, -708.838)
+rotation = Vector3(-0.513, 0.330, -0.609)
+radius = 7.431
+height = 103.384
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_323" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 530.558, -529.515, -742.578)
+rotation = Vector3(-0.527, 0.362, -0.646)
+radius = 15.970
+height = 122.426
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_324" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 540.429, -532.816, -734.182)
+rotation = Vector3(-0.518, 0.363, -0.655)
+radius = 17.530
+height = 116.422
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_325" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 609.959, -541.050, 730.204)
+rotation = Vector3(0.483, -0.382, -0.713)
+radius = 8.272
+height = 163.624
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_326" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 633.068, -551.233, 729.091)
+rotation = Vector3(0.472, -0.391, -0.736)
+radius = 15.448
+height = 171.189
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_327" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 621.764, -571.143, 723.451)
+rotation = Vector3(0.476, -0.397, -0.741)
+radius = 16.777
+height = 127.430
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_328" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 140.072, -322.297, 554.833)
+rotation = Vector3(0.468, -0.066, -0.145)
+radius = 12.900
+height = 40.412
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_329" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 145.148, -329.536, 572.444)
+rotation = Vector3(0.482, -0.071, -0.152)
+radius = 9.835
+height = 45.120
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_330" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -408.601, -384.342, -716.640)
+rotation = Vector3(-0.533, -0.240, 0.448)
+radius = 19.717
+height = 216.935
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_331" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -378.004, -403.664, -721.071)
+rotation = Vector3(-0.552, -0.236, 0.430)
+radius = 12.111
+height = 173.337
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_332" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -424.228, -417.776, -718.474)
+rotation = Vector3(-0.537, -0.260, 0.480)
+radius = 6.411
+height = 177.548
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_333" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -521.078, -411.369, -531.980)
+rotation = Vector3(-0.390, -0.218, 0.528)
+radius = 9.160
+height = 75.413
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_334" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -508.894, -402.593, -539.406)
+rotation = Vector3(-0.397, -0.216, 0.515)
+radius = 11.186
+height = 85.762
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_335" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -513.604, -425.488, -545.947)
+rotation = Vector3(-0.404, -0.227, 0.532)
+radius = 13.922
+height = 58.878
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_336" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 245.559, -161.586, 54.312)
+rotation = Vector3(0.042, -0.008, -0.196)
+radius = 18.515
+height = 127.385
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_337" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 264.186, -177.198, 47.739)
+rotation = Vector3(0.037, -0.008, -0.213)
+radius = 7.140
+height = 103.852
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_338" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 237.300, -146.161, 77.585)
+rotation = Vector3(0.060, -0.011, -0.187)
+radius = 9.780
+height = 156.906
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_339" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 266.414, -156.627, 50.948)
+rotation = Vector3(0.039, -0.008, -0.211)
+radius = 5.743
+height = 145.230
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_340" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 227.596, -182.478, 27.469)
+rotation = Vector3(0.022, -0.004, -0.185)
+radius = 13.055
+height = 77.833
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_341" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60.133, -135.821, 337.661)
+rotation = Vector3(0.260, -0.013, -0.049)
+radius = 16.395
+height = 219.755
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_342" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 66.874, -172.934, 311.064)
+rotation = Vector3(0.248, -0.014, -0.056)
+radius = 5.054
+height = 135.289
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_343" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48.950, -127.545, 307.333)
+rotation = Vector3(0.237, -0.009, -0.040)
+radius = 15.431
+height = 219.917
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_344" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 86.824, -123.045, 336.882)
+rotation = Vector3(0.257, -0.018, -0.070)
+radius = 11.900
+height = 246.993
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_345" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30.762, -165.645, 333.089)
+rotation = Vector3(0.263, -0.007, -0.026)
+radius = 13.881
+height = 157.754
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_346" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -492.464, -266.770, 377.342)
+rotation = Vector3(0.271, 0.121, 0.426)
+radius = 9.024
+height = 183.887
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_347" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37.880, -312.211, -677.368)
+rotation = Vector3(-0.556, 0.022, -0.041)
+radius = 10.752
+height = 164.018
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_348" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 25.224, -306.612, -685.361)
+rotation = Vector3(-0.560, 0.014, -0.027)
+radius = 5.247
+height = 181.358
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_349" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 307.258, -177.971, 93.626)
+rotation = Vector3(0.072, -0.018, -0.247)
+radius = 16.229
+height = 127.076
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_350" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 326.378, -189.933, 86.305)
+rotation = Vector3(0.066, -0.018, -0.264)
+radius = 7.967
+height = 112.555
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_351" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -112.775, -180.340, 301.717)
+rotation = Vector3(0.240, 0.023, 0.095)
+radius = 14.394
+height = 122.952
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_352" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -98.359, -199.748, 283.798)
+rotation = Vector3(0.231, 0.019, 0.084)
+radius = 7.806
+height = 74.528
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_353" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -93.719, -201.480, 320.353)
+rotation = Vector3(0.260, 0.021, 0.081)
+radius = 17.749
+height = 88.261
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_354" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -82.490, -185.937, 293.162)
+rotation = Vector3(0.236, 0.016, 0.070)
+radius = 17.453
+height = 103.355
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_355" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 262.539, -309.237, 665.086)
+rotation = Vector3(0.519, -0.138, -0.273)
+radius = 8.919
+height = 208.471
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_356" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 254.576, -322.566, 668.807)
+rotation = Vector3(0.527, -0.138, -0.269)
+radius = 5.344
+height = 186.872
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_357" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 251.316, -280.374, 657.602)
+rotation = Vector3(0.507, -0.125, -0.253)
+radius = 16.339
+height = 245.120
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_358" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 281.547, -331.924, 673.980)
+rotation = Vector3(0.528, -0.154, -0.300)
+radius = 17.854
+height = 187.899
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_359" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 240.120, -299.746, 660.388)
+rotation = Vector3(0.517, -0.124, -0.248)
+radius = 16.819
+height = 210.999
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_360" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.989, -250.357, 429.084)
+rotation = Vector3(0.357, 0.002, 0.006)
+radius = 17.550
+height = 54.254
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_361" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 21.159, -258.937, 420.817)
+rotation = Vector3(0.353, -0.007, -0.020)
+radius = 12.916
+height = 32.743
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_362" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11.876, -259.281, 434.233)
+rotation = Vector3(0.364, -0.004, -0.011)
+radius = 6.929
+height = 41.261
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_363" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8.504, -252.843, 457.384)
+rotation = Vector3(0.379, 0.003, 0.008)
+radius = 9.837
+height = 70.014
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_364" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -662.216, -423.988, 419.073)
+rotation = Vector3(0.281, 0.197, 0.624)
+radius = 9.565
+height = 103.398
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_365" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -666.337, -424.974, 434.206)
+rotation = Vector3(0.289, 0.205, 0.629)
+radius = 6.669
+height = 116.517
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_366" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -172.333, -222.055, -362.922)
+rotation = Vector3(-0.293, -0.044, 0.152)
+radius = 17.722
+height = 89.148
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_367" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -143.072, -233.358, -369.535)
+rotation = Vector3(-0.302, -0.038, 0.128)
+radius = 14.560
+height = 64.208
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_368" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -171.189, -219.565, -340.536)
+rotation = Vector3(-0.275, -0.041, 0.150)
+radius = 8.578
+height = 80.884
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_369" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 371.392, -418.695, -746.022)
+rotation = Vector3(-0.573, 0.247, -0.435)
+radius = 9.341
+height = 174.832
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_370" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 351.390, -420.823, -706.843)
+rotation = Vector3(-0.557, 0.226, -0.409)
+radius = 16.816
+height = 115.463
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_371" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -584.301, -579.204, 834.054)
+rotation = Vector3(0.546, 0.448, 0.746)
+radius = 19.012
+height = 215.920
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_372" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -610.615, -582.140, 812.291)
+rotation = Vector3(0.522, 0.444, 0.762)
+radius = 17.669
+height = 208.879
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_373" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -569.074, -542.779, 801.000)
+rotation = Vector3(0.537, 0.407, 0.699)
+radius = 13.872
+height = 207.891
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_374" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -554.798, -604.559, 832.250)
+rotation = Vector3(0.563, 0.456, 0.743)
+radius = 5.669
+height = 155.909
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_375" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -465.236, -397.115, 536.906)
+rotation = Vector3(0.407, 0.202, 0.476)
+radius = 17.633
+height = 58.041
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_376" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -476.051, -390.151, 511.447)
+rotation = Vector3(0.386, 0.193, 0.478)
+radius = 14.738
+height = 56.011
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_377" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 436.154, -384.481, -570.581)
+rotation = Vector3(-0.435, 0.201, -0.450)
+radius = 18.764
+height = 87.627
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_378" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 420.249, -378.867, -585.209)
+rotation = Vector3(-0.448, 0.199, -0.436)
+radius = 5.910
+height = 99.434
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_379" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 431.651, -374.189, -532.411)
+rotation = Vector3(-0.409, 0.183, -0.436)
+radius = 17.700
+height = 67.446
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_380" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 405.896, -362.631, -554.620)
+rotation = Vector3(-0.428, 0.179, -0.412)
+radius = 17.728
+height = 88.766
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_381" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 317.223, -388.058, -616.561)
+rotation = Vector3(-0.500, 0.172, -0.348)
+radius = 14.664
+height = 53.409
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_382" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 307.124, -394.863, -629.135)
+rotation = Vector3(-0.513, 0.173, -0.342)
+radius = 6.306
+height = 49.845
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_383" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 332.912, -399.735, -619.753)
+rotation = Vector3(-0.502, 0.184, -0.368)
+radius = 6.370
+height = 45.775
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_384" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 314.988, -371.815, -597.198)
+rotation = Vector3(-0.483, 0.161, -0.337)
+radius = 9.202
+height = 60.104
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_385" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 625.064, -584.454, 744.363)
+rotation = Vector3(0.484, -0.415, -0.758)
+radius = 12.569
+height = 137.634
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_386" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 69.283, -276.415, -497.072)
+rotation = Vector3(-0.415, 0.027, -0.067)
+radius = 14.195
+height = 61.157
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_387" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 75.312, -283.064, -512.091)
+rotation = Vector3(-0.428, 0.031, -0.074)
+radius = 7.032
+height = 62.077
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_388" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 79.766, -268.184, -477.627)
+rotation = Vector3(-0.397, 0.030, -0.076)
+radius = 12.471
+height = 62.112
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_389" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 85.564, -279.127, -509.380)
+rotation = Vector3(-0.424, 0.034, -0.084)
+radius = 9.403
+height = 68.315
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_390" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.715, -154.332, 323.403)
+rotation = Vector3(0.254, -0.001, -0.002)
+radius = 16.673
+height = 173.935
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_391" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.093, -146.492, 361.072)
+rotation = Vector3(0.280, 0.001, 0.003)
+radius = 17.892
+height = 208.963
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_392" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -239.958, -125.360, 42.466)
+rotation = Vector3(0.032, 0.006, 0.186)
+radius = 13.825
+height = 195.450
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_393" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -229.441, -153.918, 20.024)
+rotation = Vector3(0.016, 0.003, 0.182)
+radius = 10.759
+height = 134.376
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")
+
+[node name="Rock_394" type="CSGCylinder3D" parent="Obstacles"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -211.094, -152.298, 24.920)
+rotation = Vector3(0.019, 0.003, 0.168)
+radius = 15.833
+height = 131.358
+use_collision = false
+material = SubResource("StandardMaterial3D_rock")

@@ -1,0 +1,84 @@
+extends Camera3D
+
+@export var target: Node3D
+@export var rotate_with_target: bool = true
+@export var camera_height: float = 35.0
+@export var min_camera_height: float = 10.0
+@export var max_camera_height: float = 100.0
+@export var zoom_speed: float = 5.0
+@export var spectator_speed: float = 50.0
+
+@export var pitch_speed: float = 60.0
+var camera_pitch: float = -90.0
+
+func _ready() -> void:
+	make_current()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_C:
+			rotate_with_target = !rotate_with_target
+			
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			camera_height -= zoom_speed
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			camera_height += zoom_speed
+			
+		camera_height = clamp(camera_height, min_camera_height, max_camera_height)
+
+func _process(delta: float) -> void:
+	if Input.is_key_pressed(KEY_Z):
+		camera_pitch -= pitch_speed * delta
+	if Input.is_key_pressed(KEY_X):
+		camera_pitch += pitch_speed * delta
+	camera_pitch = clamp(camera_pitch, -90.0, -30.0)
+	
+	if target and "sync_hp" in target and target.sync_hp <= 0:
+		target = null
+		
+	if not target:
+		var players_node = get_node_or_null("../Players")
+		if players_node:
+			var local_id = str(multiplayer.get_unique_id())
+			if players_node.has_node(local_id):
+				var p = players_node.get_node(local_id)
+				if "sync_hp" in p and p.sync_hp > 0:
+					target = p
+		
+		# Режим Spectator (наблюдатель) - если у нас нет корабля
+		if not target:
+			var move_dir = Vector3.ZERO
+			if Input.is_key_pressed(KEY_W): move_dir.z -= 1.0
+			if Input.is_key_pressed(KEY_S): move_dir.z += 1.0
+			if Input.is_key_pressed(KEY_A): move_dir.x -= 1.0
+			if Input.is_key_pressed(KEY_D): move_dir.x += 1.0
+			
+			if move_dir != Vector3.ZERO:
+				move_dir = move_dir.normalized()
+				global_position += move_dir * spectator_speed * delta
+				
+			global_position.y = camera_height
+			rotation_degrees = Vector3(camera_pitch, 0, 0)
+			return
+			
+	var horizontal_dist = 0.0
+	if abs(camera_pitch + 90.0) > 0.1:
+		var pitch_rad = deg_to_rad(camera_pitch)
+		horizontal_dist = camera_height / tan(-pitch_rad)
+		
+	if rotate_with_target:
+		# Камера вращается вместе с кораблем (находится сзади, то есть по локальной +Z)
+		var backward_dir = target.transform.basis.z.normalized()
+		global_position = target.global_position + backward_dir * horizontal_dist
+		global_position.y = target.global_position.y + camera_height
+		
+		rotation_degrees.y = target.rotation_degrees.y
+		rotation_degrees.x = camera_pitch
+		rotation_degrees.z = 0
+	else:
+		# Статичная ориентация (камера сзади по глобальной +Z)
+		global_position = target.global_position + Vector3(0, 0, horizontal_dist)
+		global_position.y = target.global_position.y + camera_height
+		
+		rotation_degrees = Vector3(camera_pitch, 0, 0)
