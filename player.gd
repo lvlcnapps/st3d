@@ -17,8 +17,9 @@ var current_cooldown: float = 0.0
 @export var sync_velocity: Vector3 = Vector3.ZERO
 @export var sync_hp: float = 100.0
 @export var sync_energy: float = 100.0
+@export var sync_nickname: String = ""
 
-var client_input = {"turn": 0.0, "move": 0.0, "shoot": false, "auto_sas": false, "shift_sas": false, "respawn": false}
+var client_input = {"turn": 0.0, "move": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": false}
 
 var auto_sas_enabled: bool = false
 var dead_timer: float = 0.0
@@ -31,6 +32,7 @@ var was_dead: bool = false
 @onready var laser_mesh = get_node_or_null("LaserPivot/LaserMesh")
 @onready var ship_model = get_node_or_null("ShipModel")
 @onready var collision_shape = get_node_or_null("CollisionShape3D")
+@onready var nickname_label = get_node_or_null("NicknameLabel")
 @onready var dead_label = get_node_or_null("HUD/CenterContainer/DeadLabel")
 
 func _ready() -> void:
@@ -39,7 +41,12 @@ func _ready() -> void:
 			$HUD.hide()
 		if laser_pivot:
 			laser_pivot.hide()
+		if nickname_label:
+			# Чужие ники белые
+			nickname_label.modulate = Color(1.0, 1.0, 1.0) 
 	else:
+		if nickname_label:
+			nickname_label.hide() # Скрываем свой ник
 		if laser_mesh:
 			laser_mesh.extra_cull_margin = 10000.0
 			laser_mesh.custom_aabb = AABB(Vector3(-1000, -1000, -1000), Vector3(2000, 2000, 2000))
@@ -49,7 +56,8 @@ func _physics_process(delta: float) -> void:
 		var turn_input: float = 0.0
 		var move_input: float = 0.0
 		var shoot = false
-		var shift_sas = false
+		var ctrl_sas = false
+		var boost = false
 		var respawn = false
 		
 		if sync_hp > 0:
@@ -58,7 +66,8 @@ func _physics_process(delta: float) -> void:
 			if Input.is_key_pressed(KEY_W): move_input += 1.0
 			if Input.is_key_pressed(KEY_S): move_input -= 1.0
 			shoot = Input.is_key_pressed(KEY_SPACE)
-			shift_sas = Input.is_key_pressed(KEY_SHIFT)
+			ctrl_sas = Input.is_key_pressed(KEY_CTRL)
+			boost = Input.is_key_pressed(KEY_SHIFT)
 		else:
 			respawn = Input.is_key_pressed(KEY_R)
 		
@@ -67,7 +76,8 @@ func _physics_process(delta: float) -> void:
 			"move": move_input, 
 			"shoot": shoot,
 			"auto_sas": auto_sas_enabled,
-			"shift_sas": shift_sas,
+			"ctrl_sas": ctrl_sas,
+			"boost": boost,
 			"respawn": respawn
 		}
 		receive_input.rpc_id(1, input_data)
@@ -85,10 +95,26 @@ func _process(_delta: float) -> void:
 	var is_dead = sync_hp <= 0
 	if ship_model: ship_model.visible = not is_dead
 	
+	var is_local = str(name) == str(multiplayer.get_unique_id())
+	
+	if nickname_label:
+		if is_local:
+			nickname_label.visible = false
+		else:
+			nickname_label.text = sync_nickname
+			nickname_label.visible = not is_dead
+			if nickname_label.visible:
+				var cam = get_viewport().get_camera_3d()
+				if cam:
+					var dist = global_position.distance_to(cam.global_position)
+					# Базовый масштаб + рост от расстояния. Вдали ник будет казаться меньше, чем вблизи, но не исчезнет
+					var s = 10.0 + dist * 0.2
+					nickname_label.scale = Vector3(s, s, s)
+	
 	if str(name) == str(multiplayer.get_unique_id()):
 		if has_node("HUD/MarginContainer/SpeedLabel"):
 			var speed_label: Label = get_node("HUD/MarginContainer/SpeedLabel")
-			var sas_text = "AUTO" if auto_sas_enabled else ("ON" if Input.is_key_pressed(KEY_SHIFT) else "OFF")
+			var sas_text = "AUTO" if auto_sas_enabled else ("ON" if Input.is_key_pressed(KEY_CTRL) else "OFF")
 			speed_label.text = "HP: %d\nEnergy: %d\nSpeed: %.1f units/s\nSAS: %s" % [int(sync_hp), int(sync_energy), sync_velocity.length(), sas_text]
 
 		if dead_label:
@@ -167,7 +193,8 @@ func apply_physics(delta: float) -> void:
 	var turn_input = client_input.get("turn", 0.0)
 	var move_input = client_input.get("move", 0.0)
 	var is_shooting = client_input.get("shoot", false)
-	var is_sas = client_input.get("auto_sas", false) or client_input.get("shift_sas", false)
+	var is_sas = client_input.get("auto_sas", false) or client_input.get("ctrl_sas", false)
+	var is_boost = client_input.get("boost", false)
 	
 	if turn_input != 0.0:
 		current_angular_velocity += turn_input * angular_acceleration * delta
@@ -177,8 +204,15 @@ func apply_physics(delta: float) -> void:
 	current_angular_velocity = clamp(current_angular_velocity, -max_angular_speed, max_angular_speed)
 	rotation.y += current_angular_velocity * delta
 	
+	var current_accel = acceleration
+	
+	if is_boost and move_input != 0.0 and sync_energy > 0:
+		current_accel *= 2.0
+		sync_energy = max(0.0, sync_energy - 30.0 * delta)
+		energy_regen_delay = 1.0
+	
 	var forward_dir: Vector3 = -transform.basis.z
-	velocity += forward_dir * move_input * acceleration * delta
+	velocity += forward_dir * move_input * current_accel * delta
 	
 	if current_cooldown > 0:
 		current_cooldown -= delta
@@ -189,24 +223,28 @@ func apply_physics(delta: float) -> void:
 		energy_regen_delay = 3.0
 		current_cooldown = shoot_cooldown
 	
-	if velocity.length() > max_speed:
-		velocity = velocity.limit_length(max_speed)
-		
+	
 	var old_velocity = velocity
 	move_and_slide()
 	
 	for i in get_slide_collision_count():
 		var collision = get_slide_collision(i)
 		var collider = collision.get_collider()
+		var n = collision.get_normal()
+		
 		if collider is CharacterBody3D and "sync_hp" in collider:
-			var n = collision.get_normal()
 			var rel_vel = old_velocity - collider.velocity
 			var speed_along_normal = rel_vel.dot(n)
 			if speed_along_normal < 0:
-				var j = -speed_along_normal * 0.8 # уменьшенный импульс для реализма
+				var j = -speed_along_normal * 0.65 # (1 + 0.3) / 2 = 0.65, где 0.3 это упругость
 				var impulse = j * n
 				velocity = old_velocity + impulse
 				collider.velocity -= impulse
+		else:
+			var speed_along_normal = old_velocity.dot(n)
+			if speed_along_normal < 0:
+				velocity = old_velocity - 1.3 * speed_along_normal * n # 1 + 0.3 = 1.3
+				old_velocity = velocity
 	
 	sync_velocity = velocity
 
@@ -214,7 +252,7 @@ func shoot(forward_dir: Vector3) -> void:
 	if not bullet_scene: return
 		
 	var bullet = bullet_scene.instantiate()
-	bullet.position = global_position + forward_dir * 2.0
+	bullet.position = global_position + forward_dir * 3.5
 	bullet.linear_velocity = forward_dir * bullet_base_speed + velocity
 	bullet.owner_id = int(str(name))
 	

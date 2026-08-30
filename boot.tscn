@@ -42,6 +42,11 @@ layout_mode = 2
 text = "ST-3 Multiplayer"
 horizontal_alignment = 1
 
+[node name="NicknameInput" type="LineEdit" parent="UI/VBoxContainer"]
+layout_mode = 2
+placeholder_text = "Enter Nickname..."
+alignment = 1
+
 [node name="IPInput" type="LineEdit" parent="UI/VBoxContainer"]
 layout_mode = 2
 placeholder_text = "127.0.0.1"

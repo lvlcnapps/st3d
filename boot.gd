@@ -8,12 +8,14 @@ const CONFIG_PATH = "user://server_config.ini"
 @export var player_scene: PackedScene = preload("res://player.tscn")
 
 @onready var ui = $UI
+@onready var nickname_input = $UI/VBoxContainer/NicknameInput
 @onready var ip_input = $UI/VBoxContainer/IPInput
 @onready var connect_btn = $UI/VBoxContainer/ConnectBtn
 @onready var host_btn = $UI/VBoxContainer/HostBtn
 @onready var status_label = $UI/VBoxContainer/StatusLabel
 
 var current_level: Node3D
+var connected_players: Dictionary = {} # id -> nickname
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
@@ -59,7 +61,22 @@ func start_server() -> void:
 	
 	load_level()
 
+func spawn_player(id: int, nickname: String) -> void:
+	var player = player_scene.instantiate()
+	player.name = str(id)
+	player.set("sync_nickname", nickname)
+	var random_offset = Vector3(randf_range(-15, 15), 0, randf_range(-15, 15))
+	player.position = random_offset
+	var players_node = current_level.get_node_or_null("Players")
+	if players_node:
+		players_node.add_child(player)
+
 func _on_connect_pressed() -> void:
+	var nickname = nickname_input.text.strip_edges()
+	if nickname == "":
+		status_label.text = "Enter nickname!"
+		return
+
 	var ip = ip_input.text
 	if ip == "":
 		ip = "127.0.0.1"
@@ -83,9 +100,39 @@ func _on_connect_pressed() -> void:
 		connect_btn.disabled = false
 
 func _on_connected_to_server() -> void:
+	load_level() # Сначала грузим уровень, чтобы MultiplayerSpawner был готов
+	var nickname = nickname_input.text.strip_edges()
+	register_player.rpc_id(1, nickname)
+	status_label.text = "Authenticating..."
+
+@rpc("any_peer", "call_remote", "reliable")
+func register_player(nickname: String) -> void:
+	if not multiplayer.is_server(): return
+	var id = multiplayer.get_remote_sender_id()
+	
+	if nickname in connected_players.values():
+		reject_player.rpc_id(id, "Nickname taken!")
+		multiplayer.disconnect_peer(id)
+		return
+		
+	connected_players[id] = nickname
+	spawn_player(id, nickname)
+	accept_player.rpc_id(id)
+
+@rpc("authority", "call_remote", "reliable")
+func accept_player() -> void:
 	status_label.text = "Connected!"
 	ui.hide()
-	load_level()
+
+@rpc("authority", "call_remote", "reliable")
+func reject_player(reason: String) -> void:
+	status_label.text = reason
+	multiplayer.multiplayer_peer = null
+	ui.show()
+	connect_btn.disabled = false
+	if current_level:
+		current_level.queue_free()
+		current_level = null
 
 func _on_connection_failed() -> void:
 	status_label.text = "Connection failed!"
@@ -95,6 +142,7 @@ func _on_server_disconnected() -> void:
 	status_label.text = "Server disconnected!"
 	ui.show()
 	connect_btn.disabled = false
+	connected_players.clear()
 	if current_level:
 		current_level.queue_free()
 
@@ -108,20 +156,12 @@ func load_level() -> void:
 func _on_peer_connected(id: int) -> void:
 	if multiplayer.is_server():
 		print("Client connected: ", id)
-		var player = player_scene.instantiate()
-		player.name = str(id)
-		
-		# Раскидываем игроков, чтобы они не спавнились в одной точке и не взрывались от физики!
-		var random_offset = Vector3(randf_range(-15, 15), 0, randf_range(-15, 15))
-		player.position = random_offset
-		
-		var players_node = current_level.get_node_or_null("Players")
-		if players_node:
-			players_node.add_child(player)
+		# Ждем RPC register_player от клиента для спавна
 
 func _on_peer_disconnected(id: int) -> void:
 	if multiplayer.is_server():
 		print("Client disconnected: ", id)
+		connected_players.erase(id)
 		var players_node = current_level.get_node_or_null("Players")
 		if players_node and players_node.has_node(str(id)):
 			players_node.get_node(str(id)).queue_free()
