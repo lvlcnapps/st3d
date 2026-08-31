@@ -34,6 +34,12 @@ func _process(delta: float) -> void:
 		camera_pitch += pitch_speed * delta
 	camera_pitch = clamp(camera_pitch, -90.0, -30.0)
 	
+	if Input.is_key_pressed(KEY_UP):
+		camera_height -= zoom_speed * 20.0 * delta
+	if Input.is_key_pressed(KEY_DOWN):
+		camera_height += zoom_speed * 20.0 * delta
+	camera_height = clamp(camera_height, min_camera_height, max_camera_height)
+	
 	if target and "sync_hp" in target and target.sync_hp <= 0:
 		target = null
 		

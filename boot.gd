@@ -23,6 +23,29 @@ func _notification(what: int) -> void:
 			multiplayer.multiplayer_peer.close()
 		get_tree().quit()
 
+func _unhandled_input(event: InputEvent) -> void:
+	if multiplayer.is_server() and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_N:
+			spawn_bot()
+
+func spawn_bot() -> void:
+	if not current_level: return
+	var bot_id = randi() % 10000 + 10000 # id > 10000 чтобы не конфликтовать с игроками
+	var bot_nickname = "Bot_" + str(bot_id)
+	
+	var player = player_scene.instantiate()
+	player.name = str(bot_id)
+	player.set("sync_nickname", bot_nickname)
+	player.set("is_bot", true)
+	
+	var random_offset = Vector3(randf_range(-50, 50), 0, randf_range(-50, 50))
+	player.position = random_offset
+	
+	var players_node = current_level.get_node_or_null("Players")
+	if players_node:
+		players_node.add_child(player)
+		print("Spawned bot: ", bot_nickname)
+
 func _ready() -> void:
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)

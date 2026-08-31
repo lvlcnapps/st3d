@@ -4,12 +4,12 @@ extends CharacterBody3D
 @export var acceleration: float = 15.0
 
 @export var max_angular_speed: float = 3.0
-@export var angular_acceleration: float = 5.0
+@export var angular_acceleration: float = 10.0
 
 @export var bullet_scene: PackedScene = preload("res://bullet.tscn")
 @export var recoil_force: float = 5.0
 @export var shoot_cooldown: float = 0.25
-@export var bullet_base_speed: float = 50.0
+@export var bullet_base_speed: float = 100.0
 
 var current_angular_velocity: float = 0.0
 var current_cooldown: float = 0.0
@@ -18,8 +18,10 @@ var current_cooldown: float = 0.0
 @export var sync_hp: float = 100.0
 @export var sync_energy: float = 100.0
 @export var sync_nickname: String = ""
+@export var is_bot: bool = false
+@export var sync_acceleration: Vector3 = Vector3.ZERO
 
-var client_input = {"turn": 0.0, "move": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": false}
+var client_input = {"turn": 0.0, "move": 0.0, "strafe": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": false}
 
 var auto_sas_enabled: bool = false
 var dead_timer: float = 0.0
@@ -52,9 +54,10 @@ func _ready() -> void:
 			laser_mesh.custom_aabb = AABB(Vector3(-1000, -1000, -1000), Vector3(2000, 2000, 2000))
 
 func _physics_process(delta: float) -> void:
-	if str(name) == str(multiplayer.get_unique_id()):
+	if not is_bot and str(name) == str(multiplayer.get_unique_id()):
 		var turn_input: float = 0.0
 		var move_input: float = 0.0
+		var strafe_input: float = 0.0
 		var shoot = false
 		var ctrl_sas = false
 		var boost = false
@@ -65,6 +68,8 @@ func _physics_process(delta: float) -> void:
 			if Input.is_key_pressed(KEY_D): turn_input -= 1.0
 			if Input.is_key_pressed(KEY_W): move_input += 1.0
 			if Input.is_key_pressed(KEY_S): move_input -= 1.0
+			if Input.is_key_pressed(KEY_LEFT): strafe_input -= 1.0
+			if Input.is_key_pressed(KEY_RIGHT): strafe_input += 1.0
 			shoot = Input.is_key_pressed(KEY_SPACE)
 			ctrl_sas = Input.is_key_pressed(KEY_CTRL)
 			boost = Input.is_key_pressed(KEY_SHIFT)
@@ -74,6 +79,7 @@ func _physics_process(delta: float) -> void:
 		var input_data = {
 			"turn": turn_input, 
 			"move": move_input, 
+			"strafe": strafe_input,
 			"shoot": shoot,
 			"auto_sas": auto_sas_enabled,
 			"ctrl_sas": ctrl_sas,
@@ -83,10 +89,12 @@ func _physics_process(delta: float) -> void:
 		receive_input.rpc_id(1, input_data)
 		
 	if multiplayer.is_server():
+		if is_bot:
+			process_bot_ai(delta)
 		apply_physics(delta)
 		
 func _unhandled_input(event: InputEvent) -> void:
-	if str(name) == str(multiplayer.get_unique_id()):
+	if not is_bot and str(name) == str(multiplayer.get_unique_id()):
 		if sync_hp > 0 and event is InputEventKey and event.pressed and not event.echo:
 			if event.keycode == KEY_ALT:
 				auto_sas_enabled = !auto_sas_enabled
@@ -169,6 +177,8 @@ func receive_input(input_data: Dictionary) -> void:
 	client_input = input_data
 
 func apply_physics(delta: float) -> void:
+	var old_velocity_before_apply = velocity
+	
 	if sync_hp <= 0:
 		if collision_shape: collision_shape.disabled = true
 		dead_timer -= delta
@@ -192,6 +202,7 @@ func apply_physics(delta: float) -> void:
 
 	var turn_input = client_input.get("turn", 0.0)
 	var move_input = client_input.get("move", 0.0)
+	var strafe_input = client_input.get("strafe", 0.0)
 	var is_shooting = client_input.get("shoot", false)
 	var is_sas = client_input.get("auto_sas", false) or client_input.get("ctrl_sas", false)
 	var is_boost = client_input.get("boost", false)
@@ -206,13 +217,15 @@ func apply_physics(delta: float) -> void:
 	
 	var current_accel = acceleration
 	
-	if is_boost and move_input != 0.0 and sync_energy > 0:
+	if is_boost and (move_input != 0.0 or strafe_input != 0.0) and sync_energy > 0:
 		current_accel *= 2.0
 		sync_energy = max(0.0, sync_energy - 30.0 * delta)
 		energy_regen_delay = 1.0
 	
 	var forward_dir: Vector3 = -transform.basis.z
+	var right_dir: Vector3 = transform.basis.x
 	velocity += forward_dir * move_input * current_accel * delta
+	velocity += right_dir * strafe_input * current_accel * delta
 	
 	if current_cooldown > 0:
 		current_cooldown -= delta
@@ -226,6 +239,8 @@ func apply_physics(delta: float) -> void:
 	
 	var old_velocity = velocity
 	move_and_slide()
+	
+	sync_acceleration = (velocity - old_velocity_before_apply) / delta
 	
 	for i in get_slide_collision_count():
 		var collision = get_slide_collision(i)
@@ -269,3 +284,68 @@ func take_damage(amount: float) -> void:
 	sync_hp -= amount
 	if sync_hp <= 0:
 		dead_timer = 5.0
+
+func process_bot_ai(delta: float) -> void:
+	if sync_hp <= 0:
+		client_input = {"turn": 0.0, "move": 0.0, "strafe": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": true}
+		return
+		
+	var target: CharacterBody3D = null
+	var min_dist = 100000.0
+	
+	for sibling in get_parent().get_children():
+		if sibling != self and sibling is CharacterBody3D and "sync_hp" in sibling and sibling.sync_hp > 0:
+			var d = global_position.distance_to(sibling.global_position)
+			if d < min_dist:
+				min_dist = d
+				target = sibling
+				
+	var new_input = {"turn": 0.0, "move": 0.0, "strafe": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": false}
+	
+	if target:
+		var target_pos = target.global_position
+		var target_vel = target.velocity
+		
+		# Алгоритм баллистики (аналитический из EdgarBrain)
+		var D = target_pos - global_position
+		var V_rel = target_vel - velocity
+		
+		var D2 = Vector2(D.x, D.z)
+		var V_rel2 = Vector2(V_rel.x, V_rel.z)
+		
+		var b = D2.angle() - V_rel2.angle()
+		var sina = sin(b) * V_rel2.length() / bullet_base_speed
+		
+		var aim_angle = D2.angle()
+		if abs(sina) <= 1.0:
+			aim_angle -= asin(sina)
+			
+		var aim_dir = Vector3(cos(aim_angle), 0, sin(aim_angle)).normalized()
+		var forward = -transform.basis.z
+		
+		# Вычисляем разницу углов со знаком
+		var point = forward.signed_angle_to(aim_dir, Vector3.UP)
+		print("Некий поинт = " + str(point))
+		var speed = current_angular_velocity
+		var dist = abs(point)
+		
+		# ПД-регулятор из EdgarBrain (turn_to_angle)
+		if dist < 0.003 or abs(speed) > PI:
+			new_input["ctrl_sas"] = true
+		else:
+			if point > 0:
+				if speed == 0 or abs(point / speed) > abs(speed / angular_acceleration):
+					new_input["turn"] = 1.0
+				else:
+					new_input["ctrl_sas"] = true
+			else:
+				if speed == 0 or abs(point / speed) > abs(speed / angular_acceleration):
+					new_input["turn"] = -1.0
+				else:
+					new_input["ctrl_sas"] = true
+		
+		# Стреляем, если смотрим почти точно на цель
+		if aim_dir.dot(forward) > 0.999:
+			new_input["shoot"] = true
+			
+	client_input = new_input

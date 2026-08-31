@@ -7,6 +7,18 @@
 height = 3.0
 radius = 1.5
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_laser"]
+transparency = 1
+albedo_color = Color(1, 0.2, 0.2, 0.5)
+emission_enabled = true
+emission = Color(1, 0.2, 0.2, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_laser"]
+material = SubResource("StandardMaterial3D_laser")
+top_radius = 0.02
+bottom_radius = 0.02
+height = 1.0
+
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_player"]
 properties/0/path = NodePath(".:position")
 properties/0/spawn = true
@@ -26,22 +38,15 @@ properties/4/replication_mode = 1
 properties/5/path = NodePath(".:sync_nickname")
 properties/5/spawn = true
 properties/5/replication_mode = 1
-
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_laser"]
-transparency = 1
-albedo_color = Color(1, 0.2, 0.2, 0.5)
-emission_enabled = true
-emission = Color(1, 0.2, 0.2, 1)
-
-[sub_resource type="CylinderMesh" id="CylinderMesh_laser"]
-material = SubResource("StandardMaterial3D_laser")
-top_radius = 0.02
-bottom_radius = 0.02
-height = 1.0
+properties/6/path = NodePath(".:is_bot")
+properties/6/spawn = true
+properties/6/replication_mode = 1
+properties/7/path = NodePath(".:sync_acceleration")
+properties/7/spawn = true
+properties/7/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D" unique_id=1010021696]
 script = ExtResource("1")
-recoil_force = 5.0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=111414587]
 shape = SubResource("CylinderShape3D_1")
@@ -49,22 +54,22 @@ shape = SubResource("CylinderShape3D_1")
 [node name="ShipModel" parent="." unique_id=65351180 instance=ExtResource("2")]
 transform = Transform3D(-1.31134e-07, 0, 3, 0, 3, 0, -3, 0, -1.31134e-07, 0, 0, 0)
 
-[node name="ShipLight" type="OmniLight3D" parent="."]
+[node name="ShipLight" type="OmniLight3D" parent="." unique_id=2139214807]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 light_color = Color(0.9, 0.95, 1, 1)
 light_energy = 0.8
 omni_range = 15.0
 
-[node name="NicknameLabel" type="Label3D" parent="."]
+[node name="NicknameLabel" type="Label3D" parent="." unique_id=137775442]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 0)
 billboard = 1
 no_depth_test = true
 render_priority = 100
 text = "Player"
 
-[node name="LaserPivot" type="Node3D" parent="."]
+[node name="LaserPivot" type="Node3D" parent="." unique_id=1119737742]
 
-[node name="LaserMesh" type="MeshInstance3D" parent="LaserPivot"]
+[node name="LaserMesh" type="MeshInstance3D" parent="LaserPivot" unique_id=2112724528]
 transform = Transform3D(1, 0, 0, 0, -4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0, -0.5)
 mesh = SubResource("CylinderMesh_laser")
 
@@ -88,7 +93,7 @@ size_flags_vertical = 0
 theme_override_font_sizes/font_size = 24
 text = "Speed: 0.0 units/s"
 
-[node name="CenterContainer" type="CenterContainer" parent="HUD"]
+[node name="CenterContainer" type="CenterContainer" parent="HUD" unique_id=601683405]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -96,11 +101,10 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="DeadLabel" type="Label" parent="HUD/CenterContainer"]
+[node name="DeadLabel" type="Label" parent="HUD/CenterContainer" unique_id=292847958]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.2, 0.2, 1)
 theme_override_font_sizes/font_size = 48
-text = ""
 horizontal_alignment = 1
 
 [node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="." unique_id=837911470]

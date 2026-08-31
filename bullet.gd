@@ -14,13 +14,6 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 
 func _physics_process(delta: float) -> void:
-	if alive_time > life_time:
-		if multiplayer.is_server():
-			queue_free()
-		return
-		
-	alive_time += delta
-	
 	if not collision.disabled:
 		global_position += linear_velocity * delta
 
