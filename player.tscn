@@ -44,6 +44,12 @@ properties/6/replication_mode = 1
 properties/7/path = NodePath(".:sync_acceleration")
 properties/7/spawn = true
 properties/7/replication_mode = 1
+properties/8/path = NodePath(".:sync_kills")
+properties/8/spawn = true
+properties/8/replication_mode = 1
+properties/9/path = NodePath(".:sync_deaths")
+properties/9/spawn = true
+properties/9/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D" unique_id=1010021696]
 script = ExtResource("1")
@@ -92,6 +98,22 @@ size_flags_horizontal = 0
 size_flags_vertical = 0
 theme_override_font_sizes/font_size = 24
 text = "Speed: 0.0 units/s"
+
+[node name="ScoreboardPanel" type="PanelContainer" parent="HUD/MarginContainer"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 8
+size_flags_vertical = 0
+
+[node name="MarginContainer" type="MarginContainer" parent="HUD/MarginContainer/ScoreboardPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 15
+theme_override_constants/margin_top = 15
+theme_override_constants/margin_right = 15
+theme_override_constants/margin_bottom = 15
+
+[node name="VBoxContainer" type="VBoxContainer" parent="HUD/MarginContainer/ScoreboardPanel/MarginContainer"]
+layout_mode = 2
 
 [node name="CenterContainer" type="CenterContainer" parent="HUD" unique_id=601683405]
 anchors_preset = 15

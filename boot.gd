@@ -46,7 +46,55 @@ func spawn_bot() -> void:
 		players_node.add_child(player)
 		print("Spawned bot: ", bot_nickname)
 
+var server_config: Dictionary = {}
+
+func get_config_path() -> String:
+	if OS.has_feature("editor"):
+		return "res://server_config.ini"
+	else:
+		return OS.get_executable_path().get_base_dir() + "/server_config.ini"
+
+func load_or_create_config() -> void:
+	var path = get_config_path()
+	var config = ConfigFile.new()
+	if config.load(path) != OK:
+		config.set_value("server", "port", PORT_DEFAULT)
+		config.set_value("server", "max_players", MAX_CLIENTS)
+		config.set_value("gameplay", "max_hp", 100.0)
+		config.set_value("gameplay", "max_energy", 100.0)
+		config.set_value("gameplay", "respawn_time", 5.0)
+		config.set_value("gameplay", "acceleration", 15.0)
+		config.set_value("gameplay", "angular_acceleration", 10.0)
+		config.set_value("gameplay", "bullet_base_speed", 100.0)
+		config.set_value("gameplay", "recoil_force", 5.0)
+		config.set_value("gameplay", "shoot_cooldown", 0.2)
+		config.set_value("gameplay", "energy_regen_rate", 30.0)
+		config.set_value("gameplay", "energy_regen_delay_shoot", 3.0)
+		config.set_value("gameplay", "energy_regen_delay_boost", 1.0)
+		config.set_value("gameplay", "shoot_energy_cost", 15.0)
+		config.set_value("gameplay", "boost_energy_cost", 30.0)
+		config.set_value("gameplay", "bullet_damage", 40.0)
+		config.save(path)
+	
+	server_config["port"] = config.get_value("server", "port", PORT_DEFAULT)
+	server_config["max_players"] = config.get_value("server", "max_players", MAX_CLIENTS)
+	server_config["max_hp"] = config.get_value("gameplay", "max_hp", 100.0)
+	server_config["max_energy"] = config.get_value("gameplay", "max_energy", 100.0)
+	server_config["respawn_time"] = config.get_value("gameplay", "respawn_time", 5.0)
+	server_config["acceleration"] = config.get_value("gameplay", "acceleration", 15.0)
+	server_config["angular_acceleration"] = config.get_value("gameplay", "angular_acceleration", 10.0)
+	server_config["bullet_base_speed"] = config.get_value("gameplay", "bullet_base_speed", 100.0)
+	server_config["recoil_force"] = config.get_value("gameplay", "recoil_force", 5.0)
+	server_config["shoot_cooldown"] = config.get_value("gameplay", "shoot_cooldown", 0.2)
+	server_config["energy_regen_rate"] = config.get_value("gameplay", "energy_regen_rate", 30.0)
+	server_config["energy_regen_delay_shoot"] = config.get_value("gameplay", "energy_regen_delay_shoot", 3.0)
+	server_config["energy_regen_delay_boost"] = config.get_value("gameplay", "energy_regen_delay_boost", 1.0)
+	server_config["shoot_energy_cost"] = config.get_value("gameplay", "shoot_energy_cost", 15.0)
+	server_config["boost_energy_cost"] = config.get_value("gameplay", "boost_energy_cost", 30.0)
+	server_config["bullet_damage"] = config.get_value("gameplay", "bullet_damage", 40.0)
+
 func _ready() -> void:
+	load_or_create_config()
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
@@ -61,16 +109,10 @@ func _ready() -> void:
 		start_server()
 
 func start_server() -> void:
-	var port = PORT_DEFAULT
-	var config = ConfigFile.new()
-	if config.load(CONFIG_PATH) != OK:
-		config.set_value("server", "port", PORT_DEFAULT)
-		config.save(CONFIG_PATH)
-	else:
-		port = config.get_value("server", "port", PORT_DEFAULT)
+	var port = server_config["port"]
 		
 	var peer = ENetMultiplayerPeer.new()
-	var err = peer.create_server(port, MAX_CLIENTS)
+	var err = peer.create_server(port, server_config.get("max_players", MAX_CLIENTS))
 	if err != OK:
 		print("Failed to start server on port ", port)
 		if ui and status_label:
@@ -140,10 +182,11 @@ func register_player(nickname: String) -> void:
 		
 	connected_players[id] = nickname
 	spawn_player(id, nickname)
-	accept_player.rpc_id(id)
+	accept_player.rpc_id(id, server_config)
 
 @rpc("authority", "call_remote", "reliable")
-func accept_player() -> void:
+func accept_player(config: Dictionary) -> void:
+	server_config = config
 	status_label.text = "Connected!"
 	ui.hide()
 

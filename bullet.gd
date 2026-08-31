@@ -10,7 +10,12 @@ var alive_time: float = 0.0
 @onready var collision = $CollisionShape3D
 @onready var particles = $CPUParticles3D
 
+@export var damage: float = 40.0
+
 func _ready() -> void:
+	var boot = get_node_or_null("/root/Boot")
+	if boot and boot.server_config.size() > 0:
+		damage = boot.server_config.get("bullet_damage", damage)
 	body_entered.connect(_on_body_entered)
 
 func _physics_process(delta: float) -> void:
@@ -25,7 +30,7 @@ func _on_body_entered(body: Node3D) -> void:
 		if str(body.name) == str(owner_id):
 			return
 		if body.has_method("take_damage"):
-			body.take_damage(40.0)
+			body.take_damage(damage, owner_id)
 			body.velocity += linear_velocity * 0.15 # импульс от пули
 			
 	do_explode.rpc()

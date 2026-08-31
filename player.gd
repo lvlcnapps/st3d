@@ -20,8 +20,19 @@ var current_cooldown: float = 0.0
 @export var sync_nickname: String = ""
 @export var is_bot: bool = false
 @export var sync_acceleration: Vector3 = Vector3.ZERO
+@export var sync_kills: int = 0
+@export var sync_deaths: int = 0
 
 var client_input = {"turn": 0.0, "move": 0.0, "strafe": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": false}
+
+@export var max_hp: float = 100.0
+@export var max_energy: float = 100.0
+@export var respawn_time: float = 5.0
+@export var energy_regen_rate: float = 30.0
+@export var energy_regen_delay_shoot: float = 3.0
+@export var energy_regen_delay_boost: float = 1.0
+@export var shoot_energy_cost: float = 15.0
+@export var boost_energy_cost: float = 30.0
 
 var auto_sas_enabled: bool = false
 var dead_timer: float = 0.0
@@ -29,6 +40,10 @@ var energy_regen_delay: float = 0.0
 
 var local_dead_timer: float = 5.0
 var was_dead: bool = false
+
+var health_bar_node: Node3D
+var health_bar_fill: MeshInstance3D
+var xray_material: StandardMaterial3D
 
 @onready var laser_pivot = get_node_or_null("LaserPivot")
 @onready var laser_mesh = get_node_or_null("LaserPivot/LaserMesh")
@@ -38,6 +53,28 @@ var was_dead: bool = false
 @onready var dead_label = get_node_or_null("HUD/CenterContainer/DeadLabel")
 
 func _ready() -> void:
+	var boot = get_node_or_null("/root/Boot")
+	if boot and boot.server_config.size() > 0:
+		acceleration = boot.server_config.get("acceleration", acceleration)
+		angular_acceleration = boot.server_config.get("angular_acceleration", angular_acceleration)
+		bullet_base_speed = boot.server_config.get("bullet_base_speed", bullet_base_speed)
+		recoil_force = boot.server_config.get("recoil_force", recoil_force)
+		shoot_cooldown = boot.server_config.get("shoot_cooldown", shoot_cooldown)
+		max_hp = boot.server_config.get("max_hp", max_hp)
+		max_energy = boot.server_config.get("max_energy", max_energy)
+		respawn_time = boot.server_config.get("respawn_time", respawn_time)
+		energy_regen_rate = boot.server_config.get("energy_regen_rate", energy_regen_rate)
+		energy_regen_delay_shoot = boot.server_config.get("energy_regen_delay_shoot", energy_regen_delay_shoot)
+		energy_regen_delay_boost = boot.server_config.get("energy_regen_delay_boost", energy_regen_delay_boost)
+		shoot_energy_cost = boot.server_config.get("shoot_energy_cost", shoot_energy_cost)
+		boost_energy_cost = boot.server_config.get("boost_energy_cost", boost_energy_cost)
+		
+	local_dead_timer = respawn_time
+	
+	if multiplayer.is_server():
+		sync_hp = max_hp
+		sync_energy = max_energy
+		
 	if str(name) != str(multiplayer.get_unique_id()):
 		if has_node("HUD"):
 			$HUD.hide()
@@ -52,6 +89,73 @@ func _ready() -> void:
 		if laser_mesh:
 			laser_mesh.extra_cull_margin = 10000.0
 			laser_mesh.custom_aabb = AABB(Vector3(-1000, -1000, -1000), Vector3(2000, 2000, 2000))
+			
+	if str(name) != str(multiplayer.get_unique_id()):
+		var ui_board = Node3D.new()
+		ui_board.name = "UIBoard"
+		ui_board.position = Vector3(0, 3.5, 0)
+		add_child(ui_board)
+		
+		if nickname_label:
+			nickname_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+			remove_child(nickname_label)
+			ui_board.add_child(nickname_label)
+			nickname_label.position = Vector3(0, 0.6, 0)
+			nickname_label.scale = Vector3(10, 10, 10)
+		
+		# Создание хелсбара
+		health_bar_node = Node3D.new()
+		health_bar_node.name = "HealthBar"
+		health_bar_node.position = Vector3(0, -0.6, 0)
+		health_bar_node.scale = Vector3(0.8, 0.8, 0.8)
+		ui_board.add_child(health_bar_node)
+		
+		var bg_mesh = QuadMesh.new()
+		bg_mesh.size = Vector2(2.0, 0.2)
+		var bg_mat = StandardMaterial3D.new()
+		bg_mat.albedo_color = Color(0.2, 0.2, 0.2, 1.0)
+		bg_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		bg_mat.no_depth_test = true
+		bg_mat.render_priority = 10
+		bg_mesh.material = bg_mat
+		
+		var bg_inst = MeshInstance3D.new()
+		bg_inst.mesh = bg_mesh
+		health_bar_node.add_child(bg_inst)
+		
+		var fill_mesh = QuadMesh.new()
+		fill_mesh.size = Vector2(2.0, 0.2)
+		fill_mesh.center_offset = Vector3(0, 0, 0.01) # Чтобы не было Z-fighting с фоном
+		var fill_mat = StandardMaterial3D.new()
+		fill_mat.albedo_color = Color(0.0, 1.0, 0.0, 1.0)
+		fill_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		fill_mat.no_depth_test = true
+		fill_mat.render_priority = 11
+		fill_mesh.material = fill_mat
+		
+		health_bar_fill = MeshInstance3D.new()
+		health_bar_fill.mesh = fill_mesh
+		health_bar_node.add_child(health_bar_fill)
+		
+		# X-Ray материал
+		xray_material = StandardMaterial3D.new()
+		xray_material.albedo_color = Color(1.0, 0.0, 0.0, 0.0)
+		xray_material.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		xray_material.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+		xray_material.no_depth_test = true
+		xray_material.cull_mode = StandardMaterial3D.CULL_DISABLED
+		xray_material.emission_enabled = true
+		xray_material.emission = Color(1.0, 0.0, 0.0, 1.0)
+		xray_material.emission_energy_multiplier = 4.0
+		
+		if ship_model:
+			var stack = [ship_model]
+			while stack.size() > 0:
+				var node = stack.pop_back()
+				if node is MeshInstance3D:
+					node.material_overlay = xray_material
+				for c in node.get_children():
+					stack.push_back(c)
 
 func _physics_process(delta: float) -> void:
 	if not is_bot and str(name) == str(multiplayer.get_unique_id()):
@@ -108,16 +212,38 @@ func _process(_delta: float) -> void:
 	if nickname_label:
 		if is_local:
 			nickname_label.visible = false
+			var ui_board = get_node_or_null("UIBoard")
+			if ui_board: ui_board.visible = false
 		else:
-			nickname_label.text = sync_nickname
-			nickname_label.visible = not is_dead
-			if nickname_label.visible:
+			var ui_board = get_node_or_null("UIBoard")
+			if is_dead:
+				if ui_board: ui_board.visible = false
+			else:
+				if ui_board: ui_board.visible = true
+				nickname_label.text = sync_nickname
+				
 				var cam = get_viewport().get_camera_3d()
 				if cam:
 					var dist = global_position.distance_to(cam.global_position)
-					# Базовый масштаб + рост от расстояния. Вдали ник будет казаться меньше, чем вблизи, но не исчезнет
-					var s = 10.0 + dist * 0.2
-					nickname_label.scale = Vector3(s, s, s)
+					
+					if ui_board:
+						var dir = (ui_board.global_position - cam.global_position).normalized()
+						var up = Vector3.UP
+						if abs(dir.dot(up)) > 0.99:
+							up = Vector3.FORWARD
+						ui_board.look_at(ui_board.global_position + dir, up)
+						
+						var ui_s = 1.0 + dist * 0.02
+						ui_board.scale = Vector3(ui_s, ui_s, ui_s)
+						
+						if health_bar_node:
+							var hp_percent = clamp(sync_hp / max_hp, 0.0, 1.0)
+							var current_width = 2.0 * hp_percent
+							health_bar_fill.mesh.size.x = max(current_width, 0.001)
+							health_bar_fill.mesh.center_offset.x = -1.0 + (current_width / 2.0)
+						
+					if xray_material and "xray_enabled" in cam:
+						xray_material.albedo_color.a = 0.5 if cam.xray_enabled else 0.0
 	
 	if str(name) == str(multiplayer.get_unique_id()):
 		if has_node("HUD/MarginContainer/SpeedLabel"):
@@ -129,7 +255,7 @@ func _process(_delta: float) -> void:
 			if is_dead:
 				if not was_dead:
 					was_dead = true
-					local_dead_timer = 5.0
+					local_dead_timer = respawn_time
 				local_dead_timer -= _delta
 				if local_dead_timer > 0:
 					dead_label.text = "Respawn in %d..." % ceil(local_dead_timer)
@@ -169,6 +295,37 @@ func _process(_delta: float) -> void:
 				laser_pivot.hide()
 		elif laser_pivot:
 			laser_pivot.hide()
+			
+		var scoreboard_panel = get_node_or_null("HUD/MarginContainer/ScoreboardPanel")
+		if scoreboard_panel:
+			var show_scoreboard = Input.is_key_pressed(KEY_TAB) or sync_hp <= 0
+			if show_scoreboard:
+				scoreboard_panel.show()
+				var vbox = scoreboard_panel.get_node("MarginContainer/VBoxContainer")
+				for child in vbox.get_children():
+					child.queue_free()
+				
+				var players_list = []
+				for child in get_parent().get_children():
+					if child is CharacterBody3D and "sync_kills" in child:
+						players_list.append(child)
+				
+				players_list.sort_custom(func(a, b): return a.sync_kills > b.sync_kills)
+				
+				var header = Label.new()
+				header.text = "Player | Kills | Deaths"
+				header.add_theme_color_override("font_color", Color(1, 1, 0))
+				vbox.add_child(header)
+				
+				for p in players_list:
+					var l = Label.new()
+					var p_name = p.sync_nickname if p.sync_nickname != "" else p.name
+					l.text = "%s | %d | %d" % [p_name, p.sync_kills, p.sync_deaths]
+					if str(p.name) == str(multiplayer.get_unique_id()):
+						l.add_theme_color_override("font_color", Color(0.5, 1.0, 0.5))
+					vbox.add_child(l)
+			else:
+				scoreboard_panel.hide()
 
 @rpc("any_peer", "call_local", "unreliable")
 func receive_input(input_data: Dictionary) -> void:
@@ -184,8 +341,8 @@ func apply_physics(delta: float) -> void:
 		dead_timer -= delta
 		
 		if dead_timer <= 0 and client_input.get("respawn", false):
-			sync_hp = 100.0
-			sync_energy = 100.0
+			sync_hp = max_hp
+			sync_energy = max_energy
 			velocity = Vector3.ZERO
 			current_angular_velocity = 0.0
 			position = Vector3(randf_range(-15, 15), 0, randf_range(-15, 15))
@@ -198,7 +355,7 @@ func apply_physics(delta: float) -> void:
 	if energy_regen_delay > 0:
 		energy_regen_delay -= delta
 	else:
-		sync_energy = min(sync_energy + 30.0 * delta, 100.0)
+		sync_energy = min(sync_energy + energy_regen_rate * delta, max_energy)
 
 	var turn_input = client_input.get("turn", 0.0)
 	var move_input = client_input.get("move", 0.0)
@@ -219,8 +376,8 @@ func apply_physics(delta: float) -> void:
 	
 	if is_boost and (move_input != 0.0 or strafe_input != 0.0) and sync_energy > 0:
 		current_accel *= 2.0
-		sync_energy = max(0.0, sync_energy - 30.0 * delta)
-		energy_regen_delay = 1.0
+		sync_energy = max(0.0, sync_energy - boost_energy_cost * delta)
+		energy_regen_delay = energy_regen_delay_boost
 	
 	var forward_dir: Vector3 = -transform.basis.z
 	var right_dir: Vector3 = transform.basis.x
@@ -230,10 +387,10 @@ func apply_physics(delta: float) -> void:
 	if current_cooldown > 0:
 		current_cooldown -= delta
 		
-	if is_shooting and current_cooldown <= 0 and sync_energy >= 15.0:
+	if is_shooting and current_cooldown <= 0 and sync_energy >= shoot_energy_cost:
 		shoot(forward_dir)
-		sync_energy -= 15.0
-		energy_regen_delay = 3.0
+		sync_energy -= shoot_energy_cost
+		energy_regen_delay = energy_regen_delay_shoot
 		current_cooldown = shoot_cooldown
 	
 	
@@ -279,11 +436,18 @@ func shoot(forward_dir: Vector3) -> void:
 	
 	velocity -= forward_dir * recoil_force
 
-func take_damage(amount: float) -> void:
+func take_damage(amount: float, attacker_id: int = -1) -> void:
 	if sync_hp <= 0: return
 	sync_hp -= amount
 	if sync_hp <= 0:
-		dead_timer = 5.0
+		dead_timer = respawn_time
+		sync_deaths += 1
+		if attacker_id != -1 and str(attacker_id) != str(name):
+			var players_node = get_parent()
+			if players_node:
+				var attacker = players_node.get_node_or_null(str(attacker_id))
+				if attacker and "sync_kills" in attacker:
+					attacker.sync_kills += 1
 
 func process_bot_ai(delta: float) -> void:
 	if sync_hp <= 0:
