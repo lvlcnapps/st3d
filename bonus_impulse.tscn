@@ -1,0 +1,41 @@
+[gd_scene load_steps=5 format=3 uid="uid://bonus_impulse_123"]
+
+[ext_resource type="Script" uid="uid://consumable_script" path="res://consumable.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://bonus_impulse_mesh" path="res://objects/bonus_impulse.glb" id="2"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_phys"]
+radius = 0.5
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_area"]
+radius = 1.0
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_bonus"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:rotation")
+properties/1/spawn = true
+properties/1/replication_mode = 1
+
+[node name="BonusImpulse" type="RigidBody3D"]
+collision_layer = 2
+collision_mask = 7
+script = ExtResource("1")
+type = "impulse"
+
+[node name="Visual" type="Node3D" parent="."]
+
+[node name="bonus_impulse" parent="Visual" instance=ExtResource("2")]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_phys")
+
+[node name="Area3D" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 1
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D"]
+shape = SubResource("SphereShape3D_area")
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_bonus")

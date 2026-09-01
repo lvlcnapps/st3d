@@ -50,6 +50,24 @@ properties/8/replication_mode = 1
 properties/9/path = NodePath(".:sync_deaths")
 properties/9/spawn = true
 properties/9/replication_mode = 1
+properties/10/path = NodePath(".:sync_slot1_type")
+properties/10/spawn = true
+properties/10/replication_mode = 1
+properties/11/path = NodePath(".:sync_slot1_charges")
+properties/11/spawn = true
+properties/11/replication_mode = 1
+properties/12/path = NodePath(".:sync_slot2_type")
+properties/12/spawn = true
+properties/12/replication_mode = 1
+properties/13/path = NodePath(".:sync_slot2_charges")
+properties/13/spawn = true
+properties/13/replication_mode = 1
+properties/14/path = NodePath(".:sync_slot1_ready")
+properties/14/spawn = true
+properties/14/replication_mode = 1
+properties/15/path = NodePath(".:sync_slot2_ready")
+properties/15/spawn = true
+properties/15/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D" unique_id=1010021696]
 script = ExtResource("1")
@@ -114,6 +132,23 @@ theme_override_constants/margin_bottom = 15
 
 [node name="VBoxContainer" type="VBoxContainer" parent="HUD/MarginContainer/ScoreboardPanel/MarginContainer"]
 layout_mode = 2
+
+[node name="InventoryPanel" type="VBoxContainer" parent="HUD/MarginContainer"]
+layout_mode = 2
+size_flags_horizontal = 8
+size_flags_vertical = 8
+
+[node name="Slot1Label" type="Label" parent="HUD/MarginContainer/InventoryPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "[1] Пусто"
+horizontal_alignment = 2
+
+[node name="Slot2Label" type="Label" parent="HUD/MarginContainer/InventoryPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "[2] Пусто"
+horizontal_alignment = 2
 
 [node name="CenterContainer" type="CenterContainer" parent="HUD" unique_id=601683405]
 anchors_preset = 15

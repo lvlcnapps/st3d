@@ -74,6 +74,14 @@ func load_or_create_config() -> void:
 		config.set_value("gameplay", "shoot_energy_cost", 15.0)
 		config.set_value("gameplay", "boost_energy_cost", 30.0)
 		config.set_value("gameplay", "bullet_damage", 40.0)
+		config.set_value("gameplay", "bonus_respawn_time", 10.0)
+		config.set_value("gameplay", "module_grapeshot_charges", 2)
+		config.set_value("gameplay", "module_grapeshot_cooldown", 3.0)
+		config.set_value("gameplay", "module_impulse_charges", 3)
+		config.set_value("gameplay", "module_impulse_cooldown", 5.0)
+		config.set_value("gameplay", "module_grapeshot_speed", 50.0)
+		config.set_value("gameplay", "module_impulse_duration", 1.0)
+		config.set_value("gameplay", "module_impulse_acceleration", 30.0)
 		config.save(path)
 	
 	server_config["port"] = config.get_value("server", "port", PORT_DEFAULT)
@@ -92,6 +100,14 @@ func load_or_create_config() -> void:
 	server_config["shoot_energy_cost"] = config.get_value("gameplay", "shoot_energy_cost", 15.0)
 	server_config["boost_energy_cost"] = config.get_value("gameplay", "boost_energy_cost", 30.0)
 	server_config["bullet_damage"] = config.get_value("gameplay", "bullet_damage", 40.0)
+	server_config["bonus_respawn_time"] = config.get_value("gameplay", "bonus_respawn_time", 10.0)
+	server_config["module_grapeshot_charges"] = config.get_value("gameplay", "module_grapeshot_charges", 2)
+	server_config["module_grapeshot_cooldown"] = config.get_value("gameplay", "module_grapeshot_cooldown", 3.0)
+	server_config["module_impulse_charges"] = config.get_value("gameplay", "module_impulse_charges", 3)
+	server_config["module_impulse_cooldown"] = config.get_value("gameplay", "module_impulse_cooldown", 5.0)
+	server_config["module_grapeshot_speed"] = config.get_value("gameplay", "module_grapeshot_speed", 50.0)
+	server_config["module_impulse_duration"] = config.get_value("gameplay", "module_impulse_duration", 1.0)
+	server_config["module_impulse_acceleration"] = config.get_value("gameplay", "module_impulse_acceleration", 30.0)
 
 func _ready() -> void:
 	load_or_create_config()
@@ -218,6 +234,38 @@ func load_level() -> void:
 	
 	current_level = main_scene.instantiate()
 	add_child(current_level)
+	
+	var consumables_node = current_level.get_node_or_null("Consumables")
+	
+	if multiplayer.is_server() and consumables_node:
+		var spawner_positions = [
+			# Возле центра (но не в самом центре)
+			Vector3(40, 0, 40), Vector3(-40, 0, -40),
+			
+			# Среднее кольцо (среди скал)
+			Vector3(100, 0, 0), Vector3(-100, 0, 0), 
+			Vector3(0, 0, 100), Vector3(0, 0, -100),
+			
+			# Внешнее кольцо (ближе к стене барьера)
+			Vector3(120, 0, 120), Vector3(-120, 0, -120), 
+			Vector3(120, 0, -120), Vector3(-120, 0, 120)
+		]
+		for pos in spawner_positions:
+			var spawner = preload("res://consumable_spawner.gd").new()
+			spawner.position = pos
+			consumables_node.add_child(spawner)
+			
+		var module_spawner_positions = [
+			Vector3(80, 0, 80),
+			Vector3(-80, 0, 80),
+			Vector3(80, 0, -80),
+			Vector3(-80, 0, -80),
+			Vector3(0, 0, 80)
+		]
+		for pos in module_spawner_positions:
+			var spawner = preload("res://module_spawner.gd").new()
+			spawner.position = pos
+			consumables_node.add_child(spawner)
 	
 func _on_peer_connected(id: int) -> void:
 	if multiplayer.is_server():

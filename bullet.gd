@@ -32,6 +32,9 @@ func _on_body_entered(body: Node3D) -> void:
 		if body.has_method("take_damage"):
 			body.take_damage(damage, owner_id)
 			body.velocity += linear_velocity * 0.15 # импульс от пули
+	elif body is RigidBody3D:
+		if body.has_method("apply_impulse"):
+			body.apply_impulse(linear_velocity * 0.05, global_position - body.global_position)
 			
 	do_explode.rpc()
 

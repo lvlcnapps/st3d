@@ -23,7 +23,23 @@ var current_cooldown: float = 0.0
 @export var sync_kills: int = 0
 @export var sync_deaths: int = 0
 
-var client_input = {"turn": 0.0, "move": 0.0, "strafe": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": false}
+# Инвентарь
+@export var sync_slot1_type: String = ""
+@export var sync_slot1_charges: int = 0
+@export var sync_slot2_type: String = ""
+@export var sync_slot2_charges: int = 0
+@export var sync_slot1_ready: bool = true
+@export var sync_slot2_ready: bool = true
+
+var cooldown_slot1: float = 0.0
+var cooldown_slot2: float = 0.0
+var impulse_time_left: float = 0.0
+
+var module_grapeshot_speed: float = 50.0
+var module_impulse_duration: float = 1.0
+var module_impulse_acceleration: float = 30.0
+
+var client_input = {"turn": 0.0, "move": 0.0, "strafe": 0.0, "shoot": false, "auto_sas": false, "ctrl_sas": false, "boost": false, "respawn": false, "module_1": false, "module_2": false}
 
 @export var max_hp: float = 100.0
 @export var max_energy: float = 100.0
@@ -51,6 +67,8 @@ var xray_material: StandardMaterial3D
 @onready var collision_shape = get_node_or_null("CollisionShape3D")
 @onready var nickname_label = get_node_or_null("NicknameLabel")
 @onready var dead_label = get_node_or_null("HUD/CenterContainer/DeadLabel")
+@onready var slot1_label = get_node_or_null("HUD/MarginContainer/InventoryPanel/Slot1Label")
+@onready var slot2_label = get_node_or_null("HUD/MarginContainer/InventoryPanel/Slot2Label")
 
 func _ready() -> void:
 	var boot = get_node_or_null("/root/Boot")
@@ -68,6 +86,9 @@ func _ready() -> void:
 		energy_regen_delay_boost = boot.server_config.get("energy_regen_delay_boost", energy_regen_delay_boost)
 		shoot_energy_cost = boot.server_config.get("shoot_energy_cost", shoot_energy_cost)
 		boost_energy_cost = boot.server_config.get("boost_energy_cost", boost_energy_cost)
+		module_grapeshot_speed = boot.server_config.get("module_grapeshot_speed", module_grapeshot_speed)
+		module_impulse_duration = boot.server_config.get("module_impulse_duration", module_impulse_duration)
+		module_impulse_acceleration = boot.server_config.get("module_impulse_acceleration", module_impulse_acceleration)
 		
 	local_dead_timer = respawn_time
 	
@@ -166,6 +187,8 @@ func _physics_process(delta: float) -> void:
 		var ctrl_sas = false
 		var boost = false
 		var respawn = false
+		var module_1 = false
+		var module_2 = false
 		
 		if sync_hp > 0:
 			if Input.is_key_pressed(KEY_A): turn_input += 1.0
@@ -177,6 +200,8 @@ func _physics_process(delta: float) -> void:
 			shoot = Input.is_key_pressed(KEY_SPACE)
 			ctrl_sas = Input.is_key_pressed(KEY_CTRL)
 			boost = Input.is_key_pressed(KEY_SHIFT)
+			module_1 = Input.is_key_pressed(KEY_Q)
+			module_2 = Input.is_key_pressed(KEY_E)
 		else:
 			respawn = Input.is_key_pressed(KEY_R)
 		
@@ -188,7 +213,9 @@ func _physics_process(delta: float) -> void:
 			"auto_sas": auto_sas_enabled,
 			"ctrl_sas": ctrl_sas,
 			"boost": boost,
-			"respawn": respawn
+			"respawn": respawn,
+			"module_1": module_1,
+			"module_2": module_2
 		}
 		receive_input.rpc_id(1, input_data)
 		
@@ -250,6 +277,24 @@ func _process(_delta: float) -> void:
 			var speed_label: Label = get_node("HUD/MarginContainer/SpeedLabel")
 			var sas_text = "AUTO" if auto_sas_enabled else ("ON" if Input.is_key_pressed(KEY_CTRL) else "OFF")
 			speed_label.text = "HP: %d\nEnergy: %d\nSpeed: %.1f units/s\nSAS: %s" % [int(sync_hp), int(sync_energy), sync_velocity.length(), sas_text]
+			
+		if slot1_label:
+			if sync_slot1_type == "":
+				slot1_label.text = "[1] Пусто"
+				slot1_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+			else:
+				slot1_label.text = "[1] %s (%d)" % [sync_slot1_type.capitalize(), sync_slot1_charges]
+				var color = Color(1, 1, 1, 1) if sync_slot1_ready else Color(0.5, 0.5, 0.5, 1)
+				slot1_label.add_theme_color_override("font_color", color)
+				
+		if slot2_label:
+			if sync_slot2_type == "":
+				slot2_label.text = "[2] Пусто"
+				slot2_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+			else:
+				slot2_label.text = "[2] %s (%d)" % [sync_slot2_type.capitalize(), sync_slot2_charges]
+				var color = Color(1, 1, 1, 1) if sync_slot2_ready else Color(0.5, 0.5, 0.5, 1)
+				slot2_label.add_theme_color_override("font_color", color)
 
 		if dead_label:
 			if is_dead:
@@ -381,6 +426,27 @@ func apply_physics(delta: float) -> void:
 	
 	var forward_dir: Vector3 = -transform.basis.z
 	var right_dir: Vector3 = transform.basis.x
+	
+	# Обработка кулдаунов модулей
+	if cooldown_slot1 > 0:
+		cooldown_slot1 -= delta
+	sync_slot1_ready = cooldown_slot1 <= 0
+		
+	if cooldown_slot2 > 0:
+		cooldown_slot2 -= delta
+	sync_slot2_ready = cooldown_slot2 <= 0
+		
+	# Использование модулей
+	if client_input.get("module_1", false):
+		use_module(1, forward_dir)
+	if client_input.get("module_2", false):
+		use_module(2, forward_dir)
+		
+	# Применение ускорения от Impulse
+	if impulse_time_left > 0:
+		impulse_time_left -= delta
+		velocity += forward_dir * module_impulse_acceleration * delta
+	
 	velocity += forward_dir * move_input * current_accel * delta
 	velocity += right_dir * strafe_input * current_accel * delta
 	
@@ -435,6 +501,102 @@ func shoot(forward_dir: Vector3) -> void:
 		get_parent().add_child(bullet, true)
 	
 	velocity -= forward_dir * recoil_force
+
+func use_module(slot_idx: int, forward_dir: Vector3) -> void:
+	var module_type = ""
+	var is_ready = false
+	
+	if slot_idx == 1:
+		if sync_slot1_charges <= 0: return
+		module_type = sync_slot1_type
+		is_ready = cooldown_slot1 <= 0
+	elif slot_idx == 2:
+		if sync_slot2_charges <= 0: return
+		module_type = sync_slot2_type
+		is_ready = cooldown_slot2 <= 0
+		
+	if not is_ready or module_type == "": return
+	
+	var boot = get_node_or_null("/root/Boot")
+	var cooldown = 3.0
+	
+	if module_type == "grapeshot":
+		cooldown = boot.server_config.get("module_grapeshot_cooldown", 3.0) if boot else 3.0
+		# Спавним 5 пуль веером
+		var angles = [-20.0, -10.0, 0.0, 10.0, 20.0]
+		var bullets_node = get_node_or_null("../../Bullets")
+		if not bullets_node: bullets_node = get_parent()
+		
+		for deg in angles:
+			var rad = deg_to_rad(deg)
+			var shoot_dir = forward_dir.rotated(Vector3.UP, rad)
+			if bullet_scene:
+				var bullet = bullet_scene.instantiate()
+				bullet.position = global_position + shoot_dir * 3.5
+				bullet.linear_velocity = shoot_dir * module_grapeshot_speed + velocity
+				bullet.owner_id = int(str(name))
+				bullets_node.add_child(bullet, true)
+				
+	elif module_type == "impulse":
+		cooldown = boot.server_config.get("module_impulse_cooldown", 5.0) if boot else 5.0
+		impulse_time_left = module_impulse_duration
+		
+	# Устанавливаем кулдаун и тратим заряд
+	if slot_idx == 1:
+		cooldown_slot1 = cooldown
+		sync_slot1_charges -= 1
+		if sync_slot1_charges <= 0:
+			sync_slot1_type = ""
+	elif slot_idx == 2:
+		cooldown_slot2 = cooldown
+		sync_slot2_charges -= 1
+		if sync_slot2_charges <= 0:
+			sync_slot2_type = ""
+
+func apply_bonus(bonus_type: String) -> bool:
+	if sync_hp <= 0: return false # Мертвые не могут подбирать
+	
+	if bonus_type == "hp":
+		sync_hp = max_hp
+		return true
+	elif bonus_type == "energy":
+		sync_energy = max_energy
+		return true
+		
+	# Логика для модулей (grapeshot, impulse)
+	var max_c = 2
+	var boot = get_node_or_null("/root/Boot")
+	if boot and boot.server_config.size() > 0:
+		max_c = boot.server_config.get("module_" + bonus_type + "_charges", 2 if bonus_type == "grapeshot" else 3)
+	elif bonus_type == "impulse":
+		max_c = 3
+	
+	var charges_to_add = max_c
+	var picked_up = false
+	
+	# Пытаемся заполнить первый слот
+	if sync_slot1_type == bonus_type or sync_slot1_type == "":
+		if sync_slot1_type == "":
+			sync_slot1_type = bonus_type
+		var space = max_c - sync_slot1_charges
+		if space > 0:
+			var added = min(space, charges_to_add)
+			sync_slot1_charges += added
+			charges_to_add -= added
+			picked_up = true
+			
+	# Если остались заряды, пытаемся заполнить второй слот
+	if charges_to_add > 0 and (sync_slot2_type == bonus_type or sync_slot2_type == ""):
+		if sync_slot2_type == "":
+			sync_slot2_type = bonus_type
+		var space = max_c - sync_slot2_charges
+		if space > 0:
+			var added = min(space, charges_to_add)
+			sync_slot2_charges += added
+			charges_to_add -= added
+			picked_up = true
+			
+	return picked_up
 
 func take_damage(amount: float, attacker_id: int = -1) -> void:
 	if sync_hp <= 0: return
