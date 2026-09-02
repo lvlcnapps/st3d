@@ -30,6 +30,7 @@ var current_cooldown: float = 0.0
 @export var sync_slot2_charges: int = 0
 @export var sync_slot1_ready: bool = true
 @export var sync_slot2_ready: bool = true
+@export var sync_engine_state: int = 0
 
 var cooldown_slot1: float = 0.0
 var cooldown_slot2: float = 0.0
@@ -80,6 +81,15 @@ var ping_timer: float = 0.0
 @onready var hp_label = get_node_or_null("HUD/MainInterface/HPBar/HPLabel")
 @onready var energy_bar = get_node_or_null("HUD/MainInterface/EnergyBar")
 @onready var energy_label = get_node_or_null("HUD/MainInterface/EnergyBar/EnergyLabel")
+
+@onready var engine_fl_p = get_node_or_null("EngineVisuals/EngineFL/Particles")
+@onready var engine_fl_l = get_node_or_null("EngineVisuals/EngineFL/Light")
+@onready var engine_fr_p = get_node_or_null("EngineVisuals/EngineFR/Particles")
+@onready var engine_fr_l = get_node_or_null("EngineVisuals/EngineFR/Light")
+@onready var engine_rl_p = get_node_or_null("EngineVisuals/EngineRL/Particles")
+@onready var engine_rl_l = get_node_or_null("EngineVisuals/EngineRL/Light")
+@onready var engine_rr_p = get_node_or_null("EngineVisuals/EngineRR/Particles")
+@onready var engine_rr_l = get_node_or_null("EngineVisuals/EngineRR/Light")
 
 var tex_grapeshot = preload("res://gui/module_grapeshot.png")
 var tex_impulse = preload("res://gui/module_impulse.png")
@@ -365,11 +375,10 @@ func _process(_delta: float) -> void:
 				query.exclude = [self.get_rid()]
 				var result = space_state.intersect_ray(query)
 				
-				if result:
-					var hit_dist = global_position.distance_to(result.position)
-					laser_length = min(laser_length, hit_dist)
+				if result and result.get("position"):
+					laser_length = global_position.distance_to(result.position)
 					
-				laser_mesh.scale.y = laser_length
+				laser_mesh.mesh.height = laser_length
 				laser_mesh.position.z = -laser_length / 2.0
 				laser_pivot.show()
 			else:
@@ -407,6 +416,56 @@ func _process(_delta: float) -> void:
 					vbox.add_child(l)
 			else:
 				scoreboard_panel.hide()
+
+	# Обновление визуальных эффектов двигателей
+	if not is_dead:
+		var fl_on = (sync_engine_state & 1) != 0
+		var fr_on = (sync_engine_state & 2) != 0
+		var rl_on = (sync_engine_state & 4) != 0
+		var rr_on = (sync_engine_state & 8) != 0
+		var boost_on = (sync_engine_state & 16) != 0
+		
+		var current_color = Color(1.0, 0.4, 0.0) if boost_on else Color(0.2, 0.8, 1.0)
+		var current_energy = 4.0 if boost_on else 2.0
+		var vel_min = 15.0 if boost_on else 5.0
+		var vel_max = 22.0 if boost_on else 8.0
+		
+		if engine_fl_p: 
+			engine_fl_p.emitting = fl_on
+			if engine_fl_p.process_material:
+				engine_fl_p.process_material.initial_velocity_min = vel_min
+				engine_fl_p.process_material.initial_velocity_max = vel_max
+		if engine_fl_l: 
+			engine_fl_l.visible = fl_on
+			engine_fl_l.light_color = current_color
+			engine_fl_l.light_energy = current_energy
+		
+		if engine_fr_p: engine_fr_p.emitting = fr_on
+		if engine_fr_l: 
+			engine_fr_l.visible = fr_on
+			engine_fr_l.light_color = current_color
+			engine_fr_l.light_energy = current_energy
+		
+		if engine_rl_p: engine_rl_p.emitting = rl_on
+		if engine_rl_l: 
+			engine_rl_l.visible = rl_on
+			engine_rl_l.light_color = current_color
+			engine_rl_l.light_energy = current_energy
+		
+		if engine_rr_p: engine_rr_p.emitting = rr_on
+		if engine_rr_l: 
+			engine_rr_l.visible = rr_on
+			engine_rr_l.light_color = current_color
+			engine_rr_l.light_energy = current_energy
+	else:
+		if engine_fl_p: engine_fl_p.emitting = false
+		if engine_fl_l: engine_fl_l.visible = false
+		if engine_fr_p: engine_fr_p.emitting = false
+		if engine_fr_l: engine_fr_l.visible = false
+		if engine_rl_p: engine_rl_p.emitting = false
+		if engine_rl_l: engine_rl_l.visible = false
+		if engine_rr_p: engine_rr_p.emitting = false
+		if engine_rr_l: engine_rr_l.visible = false
 
 @rpc("any_peer", "call_local", "unreliable")
 func receive_input(input_data: Dictionary) -> void:
@@ -453,12 +512,22 @@ func apply_physics(delta: float) -> void:
 	current_angular_velocity = clamp(current_angular_velocity, -max_angular_speed, max_angular_speed)
 	rotation.y += current_angular_velocity * delta
 	
+	var engine_state = 0
+	if move_input > 0: engine_state |= 12 # 4 (RL) + 8 (RR)
+	if move_input < 0: engine_state |= 3  # 1 (FL) + 2 (FR)
+	if turn_input > 0: engine_state |= 9  # 1 (FL) + 8 (RR)
+	if turn_input < 0: engine_state |= 6  # 2 (FR) + 4 (RL)
+	
 	var current_accel = acceleration
 	
 	if is_boost and (move_input != 0.0 or strafe_input != 0.0) and sync_energy > 0:
 		current_accel *= 2.0
 		sync_energy = max(0.0, sync_energy - boost_energy_cost * delta)
 		energy_regen_delay = energy_regen_delay_boost
+		if engine_state > 0:
+			engine_state |= 16
+			
+	sync_engine_state = engine_state
 	
 	var forward_dir: Vector3 = -transform.basis.z
 	var right_dir: Vector3 = transform.basis.x

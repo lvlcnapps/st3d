@@ -1,12 +1,42 @@
 [gd_scene format=3 uid="uid://ycxg2xajac1o"]
 
 [ext_resource type="Script" uid="uid://burv50ciftnu2" path="res://player.gd" id="1"]
-[ext_resource type="PackedScene" uid="uid://d0f0svqt0iabh" path="res://objects/ship.glb" id="2"]
+[ext_resource type="PackedScene" uid="uid://ceue0eqww3nh7" path="res://objects/ships/ship_heavy.glb" id="2"]
 [ext_resource type="Texture2D" uid="uid://b56l08kc58q1i" path="res://gui/interface.png" id="3"]
 
 [sub_resource type="CylinderShape3D" id="CylinderShape3D_1"]
 height = 3.0
-radius = 1.5
+radius = 2.5
+
+[sub_resource type="Gradient" id="Gradient_engine"]
+offsets = PackedFloat32Array(0, 0.5, 1)
+colors = PackedColorArray(0.2, 0.8, 1, 1, 0, 0.2, 1, 0.5, 0, 0, 0, 0)
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_engine"]
+gradient = SubResource("Gradient_engine")
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_engine"]
+resource_local_to_scene = true
+direction = Vector3(0, 0, 1)
+spread = 5.0
+initial_velocity_min = 5.0
+initial_velocity_max = 8.0
+gravity = Vector3(0, 0, 0)
+scale_min = 0.5
+scale_max = 0.8
+color_ramp = SubResource("GradientTexture1D_engine")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_engine"]
+transparency = 1
+blend_mode = 1
+shading_mode = 0
+vertex_color_use_as_albedo = true
+billboard_mode = 3
+billboard_keep_scale = true
+
+[sub_resource type="QuadMesh" id="QuadMesh_engine"]
+material = SubResource("StandardMaterial3D_engine")
+size = Vector2(0.5, 0.5)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_laser"]
 transparency = 1
@@ -78,6 +108,9 @@ properties/14/replication_mode = 1
 properties/15/path = NodePath(".:sync_slot2_ready")
 properties/15/spawn = true
 properties/15/replication_mode = 1
+properties/16/path = NodePath(".:sync_engine_state")
+properties/16/spawn = true
+properties/16/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D" unique_id=1010021696]
 script = ExtResource("1")
@@ -86,7 +119,7 @@ script = ExtResource("1")
 shape = SubResource("CylinderShape3D_1")
 
 [node name="ShipModel" parent="." unique_id=65351180 instance=ExtResource("2")]
-transform = Transform3D(-1.31134e-07, 0, 3, 0, 3, 0, -3, 0, -1.31134e-07, 0, 0, 0)
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, -4, -1, -3)
 
 [node name="ShipLight" type="OmniLight3D" parent="." unique_id=2139214807]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
@@ -100,6 +133,76 @@ billboard = 1
 no_depth_test = true
 render_priority = 100
 text = "Player"
+
+[node name="EngineVisuals" type="Node3D" parent="." unique_id=987654321]
+
+[node name="EngineFL" type="Node3D" parent="EngineVisuals" unique_id=987654322]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, -1.2, -0.5, 0)
+
+[node name="Particles" type="GPUParticles3D" parent="EngineVisuals/EngineFL" unique_id=987654323]
+emitting = false
+amount = 200
+lifetime = 0.2
+local_coords = true
+process_material = SubResource("ParticleProcessMaterial_engine")
+draw_pass_1 = SubResource("QuadMesh_engine")
+
+[node name="Light" type="OmniLight3D" parent="EngineVisuals/EngineFL" unique_id=987654324]
+visible = false
+light_color = Color(0.2, 0.8, 1, 1)
+light_energy = 2.0
+omni_range = 3.0
+
+[node name="EngineFR" type="Node3D" parent="EngineVisuals" unique_id=987654325]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 1.2, -0.5, 0)
+
+[node name="Particles" type="GPUParticles3D" parent="EngineVisuals/EngineFR" unique_id=987654326]
+emitting = false
+amount = 200
+lifetime = 0.2
+local_coords = true
+process_material = SubResource("ParticleProcessMaterial_engine")
+draw_pass_1 = SubResource("QuadMesh_engine")
+
+[node name="Light" type="OmniLight3D" parent="EngineVisuals/EngineFR" unique_id=987654327]
+visible = false
+light_color = Color(0.2, 0.8, 1, 1)
+light_energy = 2.0
+omni_range = 3.0
+
+[node name="EngineRL" type="Node3D" parent="EngineVisuals" unique_id=987654328]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.2, -0.5, 2.5)
+
+[node name="Particles" type="GPUParticles3D" parent="EngineVisuals/EngineRL" unique_id=987654329]
+emitting = false
+amount = 200
+lifetime = 0.2
+local_coords = true
+process_material = SubResource("ParticleProcessMaterial_engine")
+draw_pass_1 = SubResource("QuadMesh_engine")
+
+[node name="Light" type="OmniLight3D" parent="EngineVisuals/EngineRL" unique_id=987654330]
+visible = false
+light_color = Color(0.2, 0.8, 1, 1)
+light_energy = 2.0
+omni_range = 3.0
+
+[node name="EngineRR" type="Node3D" parent="EngineVisuals" unique_id=987654331]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, -0.5, 2.5)
+
+[node name="Particles" type="GPUParticles3D" parent="EngineVisuals/EngineRR" unique_id=987654332]
+emitting = false
+amount = 200
+lifetime = 0.2
+local_coords = true
+process_material = SubResource("ParticleProcessMaterial_engine")
+draw_pass_1 = SubResource("QuadMesh_engine")
+
+[node name="Light" type="OmniLight3D" parent="EngineVisuals/EngineRR" unique_id=987654333]
+visible = false
+light_color = Color(0.2, 0.8, 1, 1)
+light_energy = 2.0
+omni_range = 3.0
 
 [node name="LaserPivot" type="Node3D" parent="." unique_id=1119737742]
 
@@ -119,14 +222,16 @@ theme_override_constants/margin_left = 20
 theme_override_constants/margin_top = 20
 theme_override_constants/margin_right = 20
 theme_override_constants/margin_bottom = 20
-[node name="DebugLabel" type="Label" parent="HUD/MarginContainer"]
+
+[node name="DebugLabel" type="Label" parent="HUD/MarginContainer" unique_id=1695053905]
 layout_mode = 2
 size_flags_horizontal = 0
 size_flags_vertical = 0
-theme_override_font_sizes/font_size = 18
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 4
-text = "Ping: 0 ms\nFPS: 0"
+theme_override_font_sizes/font_size = 18
+text = "Ping: 0 ms
+FPS: 0"
 
 [node name="ScoreboardPanel" type="PanelContainer" parent="HUD/MarginContainer" unique_id=415847172]
 visible = false
