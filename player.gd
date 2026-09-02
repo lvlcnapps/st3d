@@ -96,6 +96,15 @@ var tex_grapeshot = preload("res://gui/module_grapeshot.png")
 var tex_impulse = preload("res://gui/module_impulse.png")
 
 func _ready() -> void:
+	_apply_config()
+	_setup_ui()
+	local_dead_timer = respawn_time
+	
+	if multiplayer.is_server():
+		sync_hp = max_hp
+		sync_energy = max_energy
+		
+func _apply_config() -> void:
 	var boot = get_node_or_null("/root/Boot")
 	if boot and boot.server_config.size() > 0:
 		acceleration = boot.server_config.get("acceleration", acceleration)
@@ -114,20 +123,14 @@ func _ready() -> void:
 		module_grapeshot_speed = boot.server_config.get("module_grapeshot_speed", module_grapeshot_speed)
 		module_impulse_duration = boot.server_config.get("module_impulse_duration", module_impulse_duration)
 		module_impulse_acceleration = boot.server_config.get("module_impulse_acceleration", module_impulse_acceleration)
-		
-	local_dead_timer = respawn_time
-	
-	if multiplayer.is_server():
-		sync_hp = max_hp
-		sync_energy = max_energy
-		
+
+func _setup_ui() -> void:
 	if str(name) != str(multiplayer.get_unique_id()):
 		if has_node("HUD"):
 			$HUD.hide()
 		if laser_pivot:
 			laser_pivot.hide()
 		if nickname_label:
-			# Чужие ники белые
 			nickname_label.modulate = Color(1.0, 1.0, 1.0) 
 	else:
 		if nickname_label:
@@ -137,6 +140,9 @@ func _ready() -> void:
 			laser_mesh.custom_aabb = AABB(Vector3(-1000, -1000, -1000), Vector3(2000, 2000, 2000))
 			
 	if str(name) != str(multiplayer.get_unique_id()):
+		if has_node("UIBoard"):
+			return # UIBoard уже был создан
+			
 		var ui_board = Node3D.new()
 		ui_board.name = "UIBoard"
 		ui_board.position = Vector3(0, 3.5, 0)
@@ -309,11 +315,12 @@ func _process(_delta: float) -> void:
 					var dist = global_position.distance_to(cam.global_position)
 					
 					if ui_board:
-						var dir = (ui_board.global_position - cam.global_position).normalized()
 						var up = Vector3.UP
-						if abs(dir.dot(up)) > 0.99:
+						var dir_to_cam = (cam.global_position - ui_board.global_position).normalized()
+						if abs(dir_to_cam.dot(up)) > 0.99:
 							up = Vector3.FORWARD
-						ui_board.look_at(ui_board.global_position + dir, up)
+						ui_board.look_at(cam.global_position, up)
+						ui_board.rotate_y(PI) # Чтобы лицевая сторона смотрела на нас и не зеркалила текст
 						
 						var ui_s = 1.0 + dist * 0.02
 						ui_board.scale = Vector3(ui_s, ui_s, ui_s)
@@ -458,35 +465,65 @@ func _process(_delta: float) -> void:
 		var rl_on = (sync_engine_state & 4) != 0
 		var rr_on = (sync_engine_state & 8) != 0
 		var boost_on = (sync_engine_state & 16) != 0
+		var impulse_on = (sync_engine_state & 32) != 0
 		
-		var current_color = Color(1.0, 0.4, 0.0) if boost_on else Color(0.2, 0.8, 1.0)
-		var current_energy = 4.0 if boost_on else 2.0
-		var vel_min = 15.0 if boost_on else 5.0
-		var vel_max = 22.0 if boost_on else 8.0
+		var current_color = Color(0.2, 0.8, 1.0) # Дефолтный голубой (и для буста)
+		if impulse_on: current_color = Color(1.0, 0.2, 0.2) # Красный для импульса
+		
+		var current_energy = 4.0 if (boost_on or impulse_on) else 2.0
+		var vel_min = 20.0 if (boost_on or impulse_on) else 5.0
+		var vel_max = 28.0 if (boost_on or impulse_on) else 8.0
+		
+		var scale_min = 1.2 if impulse_on else 0.5
+		var scale_max = 1.8 if impulse_on else 0.8
 		
 		if engine_fl_p: 
 			engine_fl_p.emitting = fl_on
 			if engine_fl_p.process_material:
 				engine_fl_p.process_material.initial_velocity_min = vel_min
 				engine_fl_p.process_material.initial_velocity_max = vel_max
+				engine_fl_p.process_material.color = current_color
+				engine_fl_p.process_material.scale_min = scale_min
+				engine_fl_p.process_material.scale_max = scale_max
 		if engine_fl_l: 
 			engine_fl_l.visible = fl_on
 			engine_fl_l.light_color = current_color
 			engine_fl_l.light_energy = current_energy
 		
-		if engine_fr_p: engine_fr_p.emitting = fr_on
+		if engine_fr_p: 
+			engine_fr_p.emitting = fr_on
+			if engine_fr_p.process_material:
+				engine_fr_p.process_material.initial_velocity_min = vel_min
+				engine_fr_p.process_material.initial_velocity_max = vel_max
+				engine_fr_p.process_material.color = current_color
+				engine_fr_p.process_material.scale_min = scale_min
+				engine_fr_p.process_material.scale_max = scale_max
 		if engine_fr_l: 
 			engine_fr_l.visible = fr_on
 			engine_fr_l.light_color = current_color
 			engine_fr_l.light_energy = current_energy
 		
-		if engine_rl_p: engine_rl_p.emitting = rl_on
+		if engine_rl_p: 
+			engine_rl_p.emitting = rl_on
+			if engine_rl_p.process_material:
+				engine_rl_p.process_material.initial_velocity_min = vel_min
+				engine_rl_p.process_material.initial_velocity_max = vel_max
+				engine_rl_p.process_material.color = current_color
+				engine_rl_p.process_material.scale_min = scale_min
+				engine_rl_p.process_material.scale_max = scale_max
 		if engine_rl_l: 
 			engine_rl_l.visible = rl_on
 			engine_rl_l.light_color = current_color
 			engine_rl_l.light_energy = current_energy
 		
-		if engine_rr_p: engine_rr_p.emitting = rr_on
+		if engine_rr_p: 
+			engine_rr_p.emitting = rr_on
+			if engine_rr_p.process_material:
+				engine_rr_p.process_material.initial_velocity_min = vel_min
+				engine_rr_p.process_material.initial_velocity_max = vel_max
+				engine_rr_p.process_material.color = current_color
+				engine_rr_p.process_material.scale_min = scale_min
+				engine_rr_p.process_material.scale_max = scale_max
 		if engine_rr_l: 
 			engine_rr_l.visible = rr_on
 			engine_rr_l.light_color = current_color
@@ -561,8 +598,6 @@ func apply_physics(delta: float) -> void:
 		if engine_state > 0:
 			engine_state |= 16
 			
-	sync_engine_state = engine_state
-	
 	var forward_dir: Vector3 = -transform.basis.z
 	var right_dir: Vector3 = transform.basis.x
 	
@@ -585,6 +620,11 @@ func apply_physics(delta: float) -> void:
 	if impulse_time_left > 0:
 		impulse_time_left -= delta
 		velocity += forward_dir * module_impulse_acceleration * delta
+		engine_state |= 32
+		if engine_state & 3 == 0 and engine_state & 12 == 0:
+			engine_state |= 12 # Включаем только задние двигатели визуально при импульсе, если не было нажатий
+			
+	sync_engine_state = engine_state
 	
 	velocity += forward_dir * move_input * current_accel * delta
 	velocity += right_dir * strafe_input * current_accel * delta
@@ -692,7 +732,7 @@ func use_module(slot_idx: int, forward_dir: Vector3) -> void:
 		if sync_slot2_charges <= 0:
 			sync_slot2_type = ""
 
-func apply_bonus(bonus_type: String) -> bool:
+func apply_bonus(bonus_type: String, custom_charges: int = -1) -> bool:
 	if sync_hp <= 0: return false # Мертвые не могут подбирать
 	
 	if bonus_type == "hp":
@@ -710,7 +750,7 @@ func apply_bonus(bonus_type: String) -> bool:
 	elif bonus_type == "impulse":
 		max_c = 3
 	
-	var charges_to_add = max_c
+	var charges_to_add = custom_charges if custom_charges != -1 else max_c
 	var picked_up = false
 	
 	# Пытаемся заполнить первый слот
@@ -749,6 +789,36 @@ func take_damage(amount: float, attacker_id: int = -1) -> void:
 				var attacker = players_node.get_node_or_null(str(attacker_id))
 				if attacker and "sync_kills" in attacker:
 					attacker.sync_kills += 1
+					
+		# Выпадение лута (только на сервере, так как смерть обрабатывается сервером)
+		var boot = get_node_or_null("/root/Boot")
+		var consumables_node = null
+		if boot and boot.current_level:
+			consumables_node = boot.current_level.get_node_or_null("Consumables")
+			
+		if consumables_node:
+			var bonus_grapeshot_scene = preload("res://bonus_grapeshot.tscn")
+			var bonus_impulse_scene = preload("res://bonus_impulse.tscn")
+			
+			var spawn_module = func(type: String, charges: int, offset_x: float):
+				var scene = null
+				if type == "grapeshot": scene = bonus_grapeshot_scene
+				elif type == "impulse": scene = bonus_impulse_scene
+				if scene:
+					var b = scene.instantiate()
+					b.position = global_position + Vector3(offset_x, 0.0, randf_range(-0.5, 0.5))
+					b.custom_charges = charges
+					consumables_node.add_child(b)
+					
+			if sync_slot1_charges > 0 and sync_slot1_type != "":
+				spawn_module.call(sync_slot1_type, sync_slot1_charges, -1.0)
+			if sync_slot2_charges > 0 and sync_slot2_type != "":
+				spawn_module.call(sync_slot2_type, sync_slot2_charges, 1.0)
+				
+		sync_slot1_type = ""
+		sync_slot1_charges = 0
+		sync_slot2_type = ""
+		sync_slot2_charges = 0
 
 func process_bot_ai(delta: float) -> void:
 	if sync_hp <= 0:

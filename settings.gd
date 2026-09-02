@@ -31,6 +31,8 @@ var volume_music: float = 100.0
 var show_fps: bool = false
 var show_ping: bool = true
 
+var nickname: String = ""
+
 func _ready() -> void:
 	load_config()
 
@@ -68,6 +70,8 @@ func load_config() -> void:
 	
 	show_fps = config.get_value("ui", "show_fps", false)
 	show_ping = config.get_value("ui", "show_ping", true)
+	
+	nickname = config.get_value("ui", "nickname", "")
 
 func save_config() -> void:
 	var config = ConfigFile.new()
@@ -100,6 +104,7 @@ func save_config() -> void:
 	
 	config.set_value("ui", "show_fps", show_fps)
 	config.set_value("ui", "show_ping", show_ping)
+	config.set_value("ui", "nickname", nickname)
 	
 	config.save(CONFIG_PATH)
 

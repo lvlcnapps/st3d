@@ -8,11 +8,10 @@ const CONFIG_PATH = "user://server_config.ini"
 @export var player_scene: PackedScene = preload("res://player.tscn")
 
 @onready var ui = $UI
-@onready var nickname_input = $UI/VBoxContainer/NicknameInput
-@onready var ip_input = $UI/VBoxContainer/IPInput
 @onready var connect_btn = $UI/VBoxContainer/ConnectBtn
 @onready var host_btn = $UI/VBoxContainer/HostBtn
 @onready var settings_btn = $UI/VBoxContainer/SettingsBtn
+@onready var exit_btn = $UI/VBoxContainer/ExitBtn
 @onready var status_label = $UI/VBoxContainer/StatusLabel
 
 var current_level: Node3D
@@ -57,20 +56,20 @@ func load_or_create_config() -> void:
 	if config.load(path) != OK:
 		config.set_value("server", "port", PORT_DEFAULT)
 		config.set_value("server", "max_players", MAX_CLIENTS)
-		config.set_value("gameplay", "max_hp", 100.0)
-		config.set_value("gameplay", "max_energy", 100.0)
+		config.set_value("gameplay", "max_hp", 100)
+		config.set_value("gameplay", "max_energy", 100)
 		config.set_value("gameplay", "respawn_time", 5.0)
 		config.set_value("gameplay", "acceleration", 15.0)
 		config.set_value("gameplay", "angular_acceleration", 10.0)
-		config.set_value("gameplay", "bullet_base_speed", 100.0)
+		config.set_value("gameplay", "bullet_base_speed", 100)
 		config.set_value("gameplay", "recoil_force", 5.0)
 		config.set_value("gameplay", "shoot_cooldown", 0.2)
-		config.set_value("gameplay", "energy_regen_rate", 30.0)
+		config.set_value("gameplay", "energy_regen_rate", 30)
 		config.set_value("gameplay", "energy_regen_delay_shoot", 3.0)
 		config.set_value("gameplay", "energy_regen_delay_boost", 1.0)
-		config.set_value("gameplay", "shoot_energy_cost", 15.0)
-		config.set_value("gameplay", "boost_energy_cost", 30.0)
-		config.set_value("gameplay", "bullet_damage", 40.0)
+		config.set_value("gameplay", "shoot_energy_cost", 15)
+		config.set_value("gameplay", "boost_energy_cost", 30)
+		config.set_value("gameplay", "bullet_damage", 40)
 		config.set_value("gameplay", "bonus_respawn_time", 10.0)
 		config.set_value("gameplay", "module_grapeshot_charges", 2)
 		config.set_value("gameplay", "module_grapeshot_cooldown", 3.0)
@@ -113,10 +112,10 @@ func _ready() -> void:
 	multiplayer.connected_to_server.connect(_on_connected_to_server)
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
-	
 	connect_btn.pressed.connect(_on_connect_pressed)
-	host_btn.pressed.connect(start_server)
+	host_btn.pressed.connect(_on_host_settings_pressed)
 	settings_btn.pressed.connect(toggle_settings_menu)
+	exit_btn.pressed.connect(func(): get_tree().quit())
 	
 	var args = OS.get_cmdline_args()
 	if "server" in args:
@@ -143,6 +142,17 @@ func toggle_settings_menu() -> void:
 			settings.hide()
 		else:
 			settings.show()
+
+func _on_host_settings_pressed() -> void:
+	var settings = get_node_or_null("ServerSettingsMenu")
+	if not settings:
+		var ServerSettingsMenuScene = load("res://gui/server_settings_menu.tscn")
+		if ServerSettingsMenuScene:
+			settings = ServerSettingsMenuScene.instantiate()
+			add_child(settings)
+			
+	if settings:
+		settings.show()
 
 func start_server() -> void:
 	var port = server_config["port"]
@@ -173,38 +183,43 @@ func spawn_player(id: int, nickname: String) -> void:
 		players_node.add_child(player)
 
 func _on_connect_pressed() -> void:
-	var nickname = nickname_input.text.strip_edges()
-	if nickname == "":
-		status_label.text = "Enter nickname!"
-		return
+	var connect_menu = get_node_or_null("ClientConnectMenu")
+	if not connect_menu:
+		var ClientConnectMenuScene = load("res://gui/client_connect_menu.tscn")
+		if ClientConnectMenuScene:
+			connect_menu = ClientConnectMenuScene.instantiate()
+			add_child(connect_menu)
+	if connect_menu:
+		connect_menu.show()
 
-	var ip = ip_input.text
-	if ip == "":
-		ip = "127.0.0.1"
-		
-	var port = PORT_DEFAULT
+func connect_to_server(ip: String, port: int) -> void:
+	var connect_menu = get_node_or_null("ClientConnectMenu")
 	
 	var peer = ENetMultiplayerPeer.new()
 	var err = peer.create_client(ip, port)
 	if err != OK:
 		status_label.text = "Failed to create client"
+		if connect_menu: connect_menu.set_status("Failed to create client", true)
 		return
 		
 	multiplayer.multiplayer_peer = peer
 	status_label.text = "Connecting..."
-	connect_btn.disabled = true
 	
 	await get_tree().create_timer(5.0).timeout
 	if multiplayer.multiplayer_peer == peer and peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTING:
 		multiplayer.multiplayer_peer = null
 		status_label.text = "Connection timed out!"
-		connect_btn.disabled = false
+		if connect_menu: connect_menu.set_status("Connection timed out!", true)
 
 func _on_connected_to_server() -> void:
 	load_level() # Сначала грузим уровень, чтобы MultiplayerSpawner был готов
-	var nickname = nickname_input.text.strip_edges()
+	var nickname = Settings.nickname
 	register_player.rpc_id(1, nickname)
 	status_label.text = "Authenticating..."
+	
+	var connect_menu = get_node_or_null("ClientConnectMenu")
+	if connect_menu:
+		connect_menu.set_status("Authenticating...", false)
 
 @rpc("any_peer", "call_remote", "reliable")
 func register_player(nickname: String) -> void:
@@ -225,6 +240,17 @@ func accept_player(config: Dictionary) -> void:
 	server_config = config
 	status_label.text = "Connected!"
 	ui.hide()
+	
+	var connect_menu = get_node_or_null("ClientConnectMenu")
+	if connect_menu:
+		connect_menu.queue_free()
+	
+	if current_level:
+		var players = current_level.get_node_or_null("Players")
+		if players:
+			for p in players.get_children():
+				if p.has_method("_apply_config"):
+					p._apply_config()
 
 @rpc("authority", "call_remote", "reliable")
 func reject_player(reason: String) -> void:
@@ -232,6 +258,11 @@ func reject_player(reason: String) -> void:
 	multiplayer.multiplayer_peer = null
 	ui.show()
 	connect_btn.disabled = false
+	
+	var connect_menu = get_node_or_null("ClientConnectMenu")
+	if connect_menu:
+		connect_menu.set_status(reason, true)
+		
 	if current_level:
 		current_level.queue_free()
 		current_level = null
@@ -240,11 +271,19 @@ func _on_connection_failed() -> void:
 	status_label.text = "Connection failed!"
 	connect_btn.disabled = false
 	
+	var connect_menu = get_node_or_null("ClientConnectMenu")
+	if connect_menu:
+		connect_menu.set_status("Connection failed!", true)
+	
 func _on_server_disconnected() -> void:
 	status_label.text = "Server disconnected!"
 	ui.show()
 	connect_btn.disabled = false
 	connected_players.clear()
+	
+	var connect_menu = get_node_or_null("ClientConnectMenu")
+	if connect_menu:
+		connect_menu.set_status("Server disconnected!", true)
 	if current_level:
 		current_level.queue_free()
 

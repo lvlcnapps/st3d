@@ -6,6 +6,8 @@ class_name Consumable
 @export var hover_amplitude: float = 0.5
 @export var hover_speed: float = 3.0
 
+var custom_charges: int = -1
+
 var _time_passed: float = 0.0
 var _base_y: float = 0.0
 
@@ -17,6 +19,9 @@ func _ready() -> void:
 	axis_lock_linear_y = true
 	axis_lock_angular_x = true
 	axis_lock_angular_z = true
+	
+	# Отключаем расталкивание бонусов друг другом (маска 1 - стены, 4 - пули)
+	collision_mask = 5
 	
 	# Чтобы парение работало относительно начальной высоты
 	_base_y = global_position.y
@@ -41,6 +46,6 @@ func _on_body_entered(body: Node3D) -> void:
 		
 	if body is CharacterBody3D and body.has_method("apply_bonus"):
 		# Применяем бонус и удаляемся только если подбор успешен
-		var picked_up = body.apply_bonus(type)
+		var picked_up = body.apply_bonus(type, custom_charges)
 		if picked_up:
 			queue_free()

@@ -1,0 +1,85 @@
+[gd_scene load_steps=2 format=3 uid="uid://cxab3x3xx1x4y"]
+
+[ext_resource type="Script" path="res://gui/client_connect_menu.gd" id="1_client_connect"]
+
+[node name="ClientConnectMenu" type="CanvasLayer"]
+script = ExtResource("1_client_connect")
+
+[node name="ColorRect" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.784314)
+
+[node name="Panel" type="PanelContainer" parent="."]
+custom_minimum_size = Vector2(400, 200)
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -100.0
+offset_right = 200.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/separation = 15
+alignment = 1
+
+[node name="Label" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+theme_type_variation = &"HeaderLarge"
+text = "Connect to Server"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="NicknameInput" type="LineEdit" parent="Panel/VBox"]
+layout_mode = 2
+placeholder_text = "Enter Nickname..."
+alignment = 1
+
+[node name="HBox" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+
+[node name="IPInput" type="LineEdit" parent="Panel/VBox/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "127.0.0.1"
+alignment = 1
+
+[node name="PortInput" type="LineEdit" parent="Panel/VBox/HBox"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+placeholder_text = "7777"
+alignment = 1
+
+[node name="StatusLabel" type="Label" parent="Panel/VBox"]
+layout_mode = 2
+horizontal_alignment = 1
+theme_override_colors/font_color = Color(1, 0.4, 0.4, 1)
+
+[node name="HBoxBtns" type="HBoxContainer" parent="Panel/VBox"]
+layout_mode = 2
+alignment = 1
+
+[node name="BtnBack" type="Button" parent="Panel/VBox/HBoxBtns"]
+custom_minimum_size = Vector2(100, 35)
+layout_mode = 2
+text = "Back"
+
+[node name="Control" type="Control" parent="Panel/VBox/HBoxBtns"]
+custom_minimum_size = Vector2(30, 0)
+layout_mode = 2
+
+[node name="BtnConnect" type="Button" parent="Panel/VBox/HBoxBtns"]
+custom_minimum_size = Vector2(100, 35)
+layout_mode = 2
+text = "Connect"
