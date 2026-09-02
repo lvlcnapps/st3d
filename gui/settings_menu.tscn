@@ -1,0 +1,51 @@
+[gd_scene load_steps=2 format=3 uid="uid://s3ttingsm3nu"]
+
+[ext_resource type="Script" path="res://gui/settings_menu.gd" id="1_sett"]
+
+[node name="SettingsMenu" type="CanvasLayer"]
+process_mode = 3
+layer = 101
+visible = false
+script = ExtResource("1_sett")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -250.0
+offset_right = 300.0
+offset_bottom = 250.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="Panel"]
+layout_mode = 2
+
+[node name="Tabs" type="TabContainer" parent="Panel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Controls" type="ScrollContainer" parent="Panel/VBox/Tabs"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Panel/VBox/Tabs/Controls"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Audio" type="VBoxContainer" parent="Panel/VBox/Tabs"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Misc" type="VBoxContainer" parent="Panel/VBox/Tabs"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="BtnClose" type="Button" parent="Panel/VBox"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "Close"

@@ -72,6 +72,7 @@ var xray_material: StandardMaterial3D
 
 var current_ping: int = 0
 var ping_timer: float = 0.0
+var is_menu_open: bool = false
 
 @onready var slot1_icon = get_node_or_null("HUD/MainInterface/Slot1Icon")
 @onready var slot2_icon = get_node_or_null("HUD/MainInterface/Slot2Icon")
@@ -215,19 +216,29 @@ func _physics_process(delta: float) -> void:
 		var module_2 = false
 		
 		if sync_hp > 0:
-			if Input.is_key_pressed(KEY_A): turn_input += 1.0
-			if Input.is_key_pressed(KEY_D): turn_input -= 1.0
-			if Input.is_key_pressed(KEY_W): move_input += 1.0
-			if Input.is_key_pressed(KEY_S): move_input -= 1.0
-			if Input.is_key_pressed(KEY_LEFT): strafe_input -= 1.0
-			if Input.is_key_pressed(KEY_RIGHT): strafe_input += 1.0
-			shoot = Input.is_key_pressed(KEY_SPACE)
-			ctrl_sas = Input.is_key_pressed(KEY_CTRL)
-			boost = Input.is_key_pressed(KEY_SHIFT)
-			module_1 = Input.is_key_pressed(KEY_Q)
-			module_2 = Input.is_key_pressed(KEY_E)
+			if Input.is_key_pressed(Settings.bind_left): turn_input += 1.0
+			if Input.is_key_pressed(Settings.bind_right): turn_input -= 1.0
+			if Input.is_key_pressed(Settings.bind_forward): move_input += 1.0
+			if Input.is_key_pressed(Settings.bind_backward): move_input -= 1.0
+			if Input.is_key_pressed(Settings.bind_strafe_left): strafe_input -= 1.0
+			if Input.is_key_pressed(Settings.bind_strafe_right): strafe_input += 1.0
+			shoot = Input.is_key_pressed(Settings.bind_shoot)
+			ctrl_sas = Input.is_key_pressed(Settings.bind_sas)
+			boost = Input.is_key_pressed(Settings.bind_boost)
+			module_1 = Input.is_key_pressed(Settings.bind_module1)
+			module_2 = Input.is_key_pressed(Settings.bind_module2)
 		else:
-			respawn = Input.is_key_pressed(KEY_R)
+			respawn = Input.is_key_pressed(Settings.bind_respawn)
+			
+		if is_menu_open:
+			turn_input = 0.0
+			move_input = 0.0
+			strafe_input = 0.0
+			shoot = false
+			boost = false
+			module_1 = false
+			module_2 = false
+			respawn = false
 		
 		var input_data = {
 			"turn": turn_input, 
@@ -250,9 +261,29 @@ func _physics_process(delta: float) -> void:
 		
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_bot and str(name) == str(multiplayer.get_unique_id()):
-		if sync_hp > 0 and event is InputEventKey and event.pressed and not event.echo:
-			if event.keycode == KEY_ALT:
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode == KEY_ESCAPE:
+				toggle_pause_menu()
+			elif sync_hp > 0 and event.keycode == Settings.bind_auto_sas:
 				auto_sas_enabled = !auto_sas_enabled
+
+func toggle_pause_menu() -> void:
+	var pause_menu = get_node_or_null("PauseMenu")
+	if not pause_menu:
+		var PauseMenuScene = load("res://gui/pause_menu.tscn")
+		if PauseMenuScene:
+			pause_menu = PauseMenuScene.instantiate()
+			add_child(pause_menu)
+			
+	if pause_menu:
+		var settings = get_node_or_null("SettingsMenu")
+		if settings and settings.visible:
+			settings.hide()
+			pause_menu.show()
+			is_menu_open = true
+		else:
+			is_menu_open = !pause_menu.visible
+			pause_menu.visible = is_menu_open
 
 func _process(_delta: float) -> void:
 	var is_dead = sync_hp <= 0
@@ -302,8 +333,11 @@ func _process(_delta: float) -> void:
 			if ping_timer >= 1.0:
 				ping_timer = 0.0
 				rpc_id(1, "ping_request", Time.get_ticks_msec())
-			debug_label.text = "Ping: %d ms\nFPS: %d" % [current_ping, Engine.get_frames_per_second()]
-			
+			var debug_text = ""
+			if Settings.show_ping: debug_text += "Ping: %d ms\n" % current_ping
+			if Settings.show_fps: debug_text += "FPS: %d" % Engine.get_frames_per_second()
+			debug_label.text = debug_text.strip_edges()
+
 		if hp_bar:
 			hp_bar.max_value = max_hp
 			hp_bar.value = sync_hp
@@ -388,7 +422,7 @@ func _process(_delta: float) -> void:
 			
 		var scoreboard_panel = get_node_or_null("HUD/MarginContainer/ScoreboardPanel")
 		if scoreboard_panel:
-			var show_scoreboard = Input.is_key_pressed(KEY_TAB) or sync_hp <= 0
+			var show_scoreboard = (Input.is_key_pressed(Settings.bind_scoreboard) or sync_hp <= 0) and not is_menu_open
 			if show_scoreboard:
 				scoreboard_panel.show()
 				var vbox = scoreboard_panel.get_node("MarginContainer/VBoxContainer")

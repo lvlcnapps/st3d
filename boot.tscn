@@ -60,6 +60,10 @@ text = "Connect"
 layout_mode = 2
 text = "Host Server (For Testing)"
 
+[node name="SettingsBtn" type="Button" parent="UI/VBoxContainer"]
+layout_mode = 2
+text = "Settings"
+
 [node name="StatusLabel" type="Label" parent="UI/VBoxContainer"]
 layout_mode = 2
 horizontal_alignment = 1

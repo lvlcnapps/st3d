@@ -12,6 +12,7 @@ const CONFIG_PATH = "user://server_config.ini"
 @onready var ip_input = $UI/VBoxContainer/IPInput
 @onready var connect_btn = $UI/VBoxContainer/ConnectBtn
 @onready var host_btn = $UI/VBoxContainer/HostBtn
+@onready var settings_btn = $UI/VBoxContainer/SettingsBtn
 @onready var status_label = $UI/VBoxContainer/StatusLabel
 
 var current_level: Node3D
@@ -23,10 +24,6 @@ func _notification(what: int) -> void:
 			multiplayer.multiplayer_peer.close()
 		get_tree().quit()
 
-func _unhandled_input(event: InputEvent) -> void:
-	if multiplayer.is_server() and event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_N:
-			spawn_bot()
 
 func spawn_bot() -> void:
 	if not current_level: return
@@ -119,10 +116,33 @@ func _ready() -> void:
 	
 	connect_btn.pressed.connect(_on_connect_pressed)
 	host_btn.pressed.connect(start_server)
+	settings_btn.pressed.connect(toggle_settings_menu)
 	
 	var args = OS.get_cmdline_args()
 	if "server" in args:
 		start_server()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if multiplayer.is_server() and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_N:
+			spawn_bot()
+	if not multiplayer.is_server() and event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_ESCAPE and ui.visible:
+			toggle_settings_menu()
+
+func toggle_settings_menu() -> void:
+	var settings = get_node_or_null("SettingsMenu")
+	if not settings:
+		var SettingsMenuScene = load("res://gui/settings_menu.tscn")
+		if SettingsMenuScene:
+			settings = SettingsMenuScene.instantiate()
+			add_child(settings)
+	
+	if settings:
+		if settings.visible:
+			settings.hide()
+		else:
+			settings.show()
 
 func start_server() -> void:
 	var port = server_config["port"]

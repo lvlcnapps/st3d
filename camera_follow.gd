@@ -10,6 +10,7 @@ extends Camera3D
 
 @export var pitch_speed: float = 60.0
 var camera_pitch: float = -90.0
+var camera_yaw: float = 0.0
 var server_scoreboard: PanelContainer = null
 var xray_enabled: bool = false
 
@@ -46,8 +47,12 @@ func _ready() -> void:
 		margin.add_child(vbox)
 
 func _unhandled_input(event: InputEvent) -> void:
+	var is_menu_open = target and "is_menu_open" in target and target.is_menu_open
+	if is_menu_open:
+		return
+		
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_C:
+		if event.keycode == Settings.bind_cam_mode:
 			rotate_with_target = !rotate_with_target
 		elif event.keycode == KEY_V:
 			xray_enabled = !xray_enabled
@@ -61,17 +66,26 @@ func _unhandled_input(event: InputEvent) -> void:
 		camera_height = clamp(camera_height, min_camera_height, max_camera_height)
 
 func _process(delta: float) -> void:
-	if Input.is_key_pressed(KEY_Z):
-		camera_pitch -= pitch_speed * delta
-	if Input.is_key_pressed(KEY_X):
-		camera_pitch += pitch_speed * delta
-	camera_pitch = clamp(camera_pitch, -90.0, -30.0)
+	var is_menu_open = target and "is_menu_open" in target and target.is_menu_open
 	
-	if Input.is_key_pressed(KEY_UP):
-		camera_height -= zoom_speed * 20.0 * delta
-	if Input.is_key_pressed(KEY_DOWN):
-		camera_height += zoom_speed * 20.0 * delta
-	camera_height = clamp(camera_height, min_camera_height, max_camera_height)
+	if not is_menu_open:
+		if Input.is_key_pressed(Settings.bind_cam_rot_left):
+			camera_pitch -= pitch_speed * delta
+		if Input.is_key_pressed(Settings.bind_cam_rot_right):
+			camera_pitch += pitch_speed * delta
+		camera_pitch = clamp(camera_pitch, -90.0, -30.0)
+		
+		if not rotate_with_target:
+			if Input.is_key_pressed(Settings.bind_cam_yaw_left):
+				camera_yaw += pitch_speed * delta
+			if Input.is_key_pressed(Settings.bind_cam_yaw_right):
+				camera_yaw -= pitch_speed * delta
+		
+		if Input.is_key_pressed(Settings.bind_cam_up):
+			camera_height -= zoom_speed * 20.0 * delta
+		if Input.is_key_pressed(Settings.bind_cam_down):
+			camera_height += zoom_speed * 20.0 * delta
+		camera_height = clamp(camera_height, min_camera_height, max_camera_height)
 	
 	if target and "sync_hp" in target and target.sync_hp <= 0:
 		target = null
@@ -91,7 +105,10 @@ func _process(delta: float) -> void:
 		if players_node and players_node.has_node(str(multiplayer.get_unique_id())):
 			has_local_player = true
 			
-		if not has_local_player:
+		var show_board = not has_local_player or Input.is_key_pressed(Settings.bind_scoreboard)
+		if is_menu_open: show_board = false
+			
+		if show_board:
 			server_scoreboard.show()
 			var vbox = server_scoreboard.get_node("MarginContainer/VBox")
 			for child in vbox.get_children():
@@ -121,10 +138,10 @@ func _process(delta: float) -> void:
 	# Режим Spectator (наблюдатель) - если у нас нет корабля
 	if not target:
 		var move_dir = Vector3.ZERO
-		if Input.is_key_pressed(KEY_W): move_dir.z -= 1.0
-		if Input.is_key_pressed(KEY_S): move_dir.z += 1.0
-		if Input.is_key_pressed(KEY_A): move_dir.x -= 1.0
-		if Input.is_key_pressed(KEY_D): move_dir.x += 1.0
+		if Input.is_key_pressed(Settings.bind_forward): move_dir.z -= 1.0
+		if Input.is_key_pressed(Settings.bind_backward): move_dir.z += 1.0
+		if Input.is_key_pressed(Settings.bind_left): move_dir.x -= 1.0
+		if Input.is_key_pressed(Settings.bind_right): move_dir.x += 1.0
 		
 		if move_dir != Vector3.ZERO:
 			move_dir = move_dir.normalized()
@@ -139,18 +156,28 @@ func _process(delta: float) -> void:
 		var pitch_rad = deg_to_rad(camera_pitch)
 		horizontal_dist = camera_height / tan(-pitch_rad)
 		
+	var look_back = false
+	if not is_menu_open:
+		look_back = Input.is_key_pressed(Settings.bind_look_back)
+		
 	if rotate_with_target:
-		# Камера вращается вместе с кораблем (находится сзади, то есть по локальной +Z)
+		# Камера вращается вместе с кораблем
 		var backward_dir = target.transform.basis.z.normalized()
+		if look_back: backward_dir = -backward_dir
+		
 		global_position = target.global_position + backward_dir * horizontal_dist
 		global_position.y = target.global_position.y + camera_height
 		
-		rotation_degrees.y = target.rotation_degrees.y
+		rotation_degrees.y = target.rotation_degrees.y if not look_back else target.rotation_degrees.y + 180.0
 		rotation_degrees.x = camera_pitch
 		rotation_degrees.z = 0
 	else:
-		# Статичная ориентация (камера сзади по глобальной +Z)
-		global_position = target.global_position + Vector3(0, 0, horizontal_dist)
+		# Статичная ориентация (но теперь с вращением по camera_yaw)
+		var yaw_rad = deg_to_rad(camera_yaw)
+		var offset = Vector3(sin(yaw_rad), 0, cos(yaw_rad)) * horizontal_dist
+		if look_back: offset = -offset
+		
+		global_position = target.global_position + offset
 		global_position.y = target.global_position.y + camera_height
 		
-		rotation_degrees = Vector3(camera_pitch, 0, 0)
+		rotation_degrees = Vector3(camera_pitch, camera_yaw + (180.0 if look_back else 0.0), 0)
