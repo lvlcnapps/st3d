@@ -67,8 +67,22 @@ var xray_material: StandardMaterial3D
 @onready var collision_shape = get_node_or_null("CollisionShape3D")
 @onready var nickname_label = get_node_or_null("NicknameLabel")
 @onready var dead_label = get_node_or_null("HUD/CenterContainer/DeadLabel")
-@onready var slot1_label = get_node_or_null("HUD/MarginContainer/InventoryPanel/Slot1Label")
-@onready var slot2_label = get_node_or_null("HUD/MarginContainer/InventoryPanel/Slot2Label")
+@onready var debug_label = get_node_or_null("HUD/MarginContainer/DebugLabel")
+
+var current_ping: int = 0
+var ping_timer: float = 0.0
+
+@onready var slot1_icon = get_node_or_null("HUD/MainInterface/Slot1Icon")
+@onready var slot2_icon = get_node_or_null("HUD/MainInterface/Slot2Icon")
+@onready var slot1_charges_label = get_node_or_null("HUD/MainInterface/Slot1Icon/ChargesLabel")
+@onready var slot2_charges_label = get_node_or_null("HUD/MainInterface/Slot2Icon/ChargesLabel")
+@onready var hp_bar = get_node_or_null("HUD/MainInterface/HPBar")
+@onready var hp_label = get_node_or_null("HUD/MainInterface/HPBar/HPLabel")
+@onready var energy_bar = get_node_or_null("HUD/MainInterface/EnergyBar")
+@onready var energy_label = get_node_or_null("HUD/MainInterface/EnergyBar/EnergyLabel")
+
+var tex_grapeshot = preload("res://gui/module_grapeshot.png")
+var tex_impulse = preload("res://gui/module_impulse.png")
 
 func _ready() -> void:
 	var boot = get_node_or_null("/root/Boot")
@@ -273,28 +287,50 @@ func _process(_delta: float) -> void:
 						xray_material.albedo_color.a = 0.5 if cam.xray_enabled else 0.0
 	
 	if str(name) == str(multiplayer.get_unique_id()):
-		if has_node("HUD/MarginContainer/SpeedLabel"):
-			var speed_label: Label = get_node("HUD/MarginContainer/SpeedLabel")
-			var sas_text = "AUTO" if auto_sas_enabled else ("ON" if Input.is_key_pressed(KEY_CTRL) else "OFF")
-			speed_label.text = "HP: %d\nEnergy: %d\nSpeed: %.1f units/s\nSAS: %s" % [int(sync_hp), int(sync_energy), sync_velocity.length(), sas_text]
+		if debug_label:
+			ping_timer += _delta
+			if ping_timer >= 1.0:
+				ping_timer = 0.0
+				rpc_id(1, "ping_request", Time.get_ticks_msec())
+			debug_label.text = "Ping: %d ms\nFPS: %d" % [current_ping, Engine.get_frames_per_second()]
 			
-		if slot1_label:
-			if sync_slot1_type == "":
-				slot1_label.text = "[1] Пусто"
-				slot1_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+		if hp_bar:
+			hp_bar.max_value = max_hp
+			hp_bar.value = sync_hp
+			if hp_label: hp_label.text = str(int(sync_hp))
+			
+		if energy_bar:
+			energy_bar.max_value = max_energy
+			energy_bar.value = sync_energy
+			if energy_label: energy_label.text = str(int(sync_energy))
+			
+		if slot1_icon:
+			if sync_slot1_type == "grapeshot":
+				slot1_icon.texture = tex_grapeshot
+			elif sync_slot1_type == "impulse":
+				slot1_icon.texture = tex_impulse
 			else:
-				slot1_label.text = "[1] %s (%d)" % [sync_slot1_type.capitalize(), sync_slot1_charges]
-				var color = Color(1, 1, 1, 1) if sync_slot1_ready else Color(0.5, 0.5, 0.5, 1)
-				slot1_label.add_theme_color_override("font_color", color)
+				slot1_icon.texture = null
 				
-		if slot2_label:
-			if sync_slot2_type == "":
-				slot2_label.text = "[2] Пусто"
-				slot2_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
+			var color = Color(1, 1, 1, 1) if sync_slot1_ready else Color(0.5, 0.5, 0.5, 1)
+			slot1_icon.modulate = color
+			
+			if slot1_charges_label:
+				slot1_charges_label.text = str(sync_slot1_charges) if sync_slot1_charges > 0 else ""
+				
+		if slot2_icon:
+			if sync_slot2_type == "grapeshot":
+				slot2_icon.texture = tex_grapeshot
+			elif sync_slot2_type == "impulse":
+				slot2_icon.texture = tex_impulse
 			else:
-				slot2_label.text = "[2] %s (%d)" % [sync_slot2_type.capitalize(), sync_slot2_charges]
-				var color = Color(1, 1, 1, 1) if sync_slot2_ready else Color(0.5, 0.5, 0.5, 1)
-				slot2_label.add_theme_color_override("font_color", color)
+				slot2_icon.texture = null
+				
+			var color = Color(1, 1, 1, 1) if sync_slot2_ready else Color(0.5, 0.5, 0.5, 1)
+			slot2_icon.modulate = color
+			
+			if slot2_charges_label:
+				slot2_charges_label.text = str(sync_slot2_charges) if sync_slot2_charges > 0 else ""
 
 		if dead_label:
 			if is_dead:
@@ -675,3 +711,13 @@ func process_bot_ai(delta: float) -> void:
 			new_input["shoot"] = true
 			
 	client_input = new_input
+
+@rpc("any_peer", "call_remote", "unreliable")
+func ping_request(client_time: int) -> void:
+	if multiplayer.is_server():
+		var sender_id = multiplayer.get_remote_sender_id()
+		rpc_id(sender_id, "ping_response", client_time)
+
+@rpc("authority", "call_remote", "unreliable")
+func ping_response(client_time: int) -> void:
+	current_ping = Time.get_ticks_msec() - client_time
